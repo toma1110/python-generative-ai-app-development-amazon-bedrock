@@ -1,0 +1,10 @@
+[project]
+name = "section02-environment-demo"
+version = "0.1.0"
+description = "A small CLI app for practicing a reproducible Python environment."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["rich>=14,<16"]
+
+[tool.uv]
+package = false

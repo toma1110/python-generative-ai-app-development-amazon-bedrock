@@ -1,14 +1,14 @@
 # PythonからAmazon Bedrockを使うハンズオン
 
-このリポジトリは、PythonからAmazon Bedrockを使う演習教材を順次公開するための配布先です。現時点では演習コードやSection別の教材はなく、このREADMEだけで学習や演習を始めることはできません。
+このリポジトリは、PythonからAmazon Bedrockを使う演習教材をSectionごとに掲載します。現在はSection 02「Pythonの実行環境」の演習を公開しています。実行手順、前提条件、結果の確認、後片付けは[Section 02のREADME](sections/s02/README.md)を参照してください。
 
 ## 今後追加する演習
 
-次のSectionの教材を順次追加する予定です。現時点ではどのSectionにも演習ファイルはありません。
+Section 02のほか、次の演習を順次追加する予定です。
 
 | 学習内容 | 演習 |
 | --- | --- |
-| Python環境と基本構文 | Section 02、03（公開予定） |
+| Python環境と基本構文 | [Section 02](sections/s02/README.md)、Section 03（公開予定） |
 | AWS接続とBedrockの呼び出し | Section 04、05（公開予定） |
 | CLI会話とファイル要約 | Section 06、07（公開予定） |
 | 出力の比較と改善 | Section 08（公開予定） |
@@ -25,4 +25,4 @@ AWSの認証情報やアプリ固有の秘密情報をコード、設定ファ�
 
 ## ライセンス
 
-このリポジトリにはLICENSEを設定していません。GitHub上で閲覧できますが、READMEを含む現時点の内容について、第三者による複製・改変・再配布を許諾していません。演習コードを追加するときに、その利用条件を明示します。
+このリポジトリの教材と資料はMIT Licenseで公開しています。利用条件は[LICENSE](LICENSE)を確認してください。
