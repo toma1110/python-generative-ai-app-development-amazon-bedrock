@@ -1,0 +1,10 @@
+[project]
+name = "section04-aws-connection-check"
+version = "0.1.0"
+description = "Confirm the AWS account and Region selected by boto3."
+readme = "../README.md"
+requires-python = ">=3.11"
+dependencies = ["boto3>=1.40,<2"]
+
+[tool.uv]
+package = false
