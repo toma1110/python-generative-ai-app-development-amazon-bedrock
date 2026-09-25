@@ -77,15 +77,15 @@ uv run --project sections/s09 python sections/s09/s09_app.py --source s3 --bucke
 
 ## 同じ原文で変更前後を比べる（s09-l06）
 
-まず変更前の結果を記録します。次のcommandは同じローカルメモに2つの異なるプロンプトを適用します。
+まず編集前の`REVISED`結果を記録します。次のcommandは同じローカルメモに、元から異なる`BASELINE`と`REVISED`の2つのプロンプトを適用します。この初回の2結果は、コード編集前後の組ではありません。
 
 ```sh
 uv run --project sections/s09 python sections/s09/s09_l06.py --source local
 ```
 
-続いて`sections/s09/s09_l06.py`を開き、`REVISED_PROMPT`の末尾に「影響した注文数は未確認なら未確認と明記してください。」を追加して保存します。`BASELINE_PROMPT`、`sample/incident-note.txt`、入力元、モデル、Regionは変えません。`main`が同じメモを`load_note`で1回読み、`compare`がその文字列を変更前・変更後の2回の`ask_model`へ渡す箇所をコードで確認してください。表示される2組の回答とtoken量・応答時間が出力です。
+続いて`sections/s09/s09_l06.py`を開き、`REVISED_PROMPT`の末尾に「影響した注文数は未確認なら未確認と明記してください。」を追加して保存します。`BASELINE_PROMPT`、`sample/incident-note.txt`、入力元、モデル、Regionは変えません。`main`が同じメモを`load_note`で1回読み、`compare`がその文字列を既存の`BASELINE`と`REVISED`の指示で2回の`ask_model`へ渡す箇所をコードで確認してください。表示される2組の回答とtoken量・応答時間が出力です。
 
-同じcommandを再実行し、編集前に控えた結果と並べてください。変更前側のpromptは同じでも生成結果は実行ごとに揺れるため、文字列の完全一致を合否基準にしません。次にAWS APIを呼ばないunit testを実行し、同じメモを2回の推論へ渡すテストが成功することを確認します。
+同じcommandを再実行し、編集前に控えた`REVISED`の結果と編集後の`REVISED`の結果を並べてください。`BASELINE`と`REVISED`は元から別々の指示であり、画面に並ぶ2つをそのまま「編集前／編集後」とは呼びません。`BASELINE`側のpromptも同じですが、生成結果は実行ごとに揺れるため、文字列の完全一致を合否基準にしません。次にAWS APIを呼ばないunit testを実行し、同じメモを2回の推論へ渡すテストが成功することを確認します。
 
 ```sh
 uv run --directory sections/s09 python -m unittest discover -s tests -v

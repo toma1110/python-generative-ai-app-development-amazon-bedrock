@@ -77,7 +77,10 @@ class Section09Tests(unittest.TestCase):
              for call in client.converse.call_args_list],
             ["same note", "same note"],
         )
-        self.assertEqual([label for label, _ in results], ["変更前", "変更後"])
+        self.assertEqual(
+            [label for label, _ in results],
+            ["BASELINE（既存の短い要約指示）", "REVISED（編集対象の指示）"],
+        )
 
     def test_missing_metrics_are_reported_as_unknown(self):
         self.assertEqual(response_metrics({}), {"input_tokens": "不明", "output_tokens": "不明", "latency_ms": "不明"})

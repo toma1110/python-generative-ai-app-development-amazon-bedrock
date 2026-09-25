@@ -16,8 +16,8 @@ REVISED_PROMPT = "確認できる事実と未確認事項を分け、各事実�
 
 def compare(client, note_text):
     return [
-        ("変更前", ask_model(client, note_text, "summary", prompt_override=BASELINE_PROMPT)),
-        ("変更後", ask_model(client, note_text, "summary", prompt_override=REVISED_PROMPT)),
+        ("BASELINE（既存の短い要約指示）", ask_model(client, note_text, "summary", prompt_override=BASELINE_PROMPT)),
+        ("REVISED（編集対象の指示）", ask_model(client, note_text, "summary", prompt_override=REVISED_PROMPT)),
     ]
 
 
@@ -39,7 +39,7 @@ def main(argv=None):
         print(f"\n## {label}")
         print(result["text"])
         print(f"利用量: 入力 {result['input_tokens']} / 出力 {result['output_tokens']} tokens; Bedrock応答時間: {result['latency_ms']} ms")
-    print("\n2つの応答を同じ原文と照合し、変更箇所・失敗時の動き・根拠を見て採用・修正・保留を判断してください。")
+    print("\nこの2つは既存の別々の指示です。演習での変更前後は、編集前に控えたREVISEDの結果と編集後のREVISEDの結果を同じ原文で比べてください。")
     return 0
 
 
