@@ -1,0 +1,9 @@
+[project]
+name = "section05-bedrock-converse"
+version = "0.1.0"
+description = "Small Amazon Bedrock Converse API exercises for Section 05."
+requires-python = ">=3.11"
+dependencies = ["boto3>=1.40,<2"]
+
+[tool.uv]
+package = false
