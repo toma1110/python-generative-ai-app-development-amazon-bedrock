@@ -60,6 +60,16 @@ class ChatTests(unittest.TestCase):
         self.assertEqual(client.calls, [])
         self.assertTrue(any("終了" in line for line in output))
 
+    def test_cli_exits_cleanly_when_interrupted_during_request(self):
+        client = FakeClient(error=KeyboardInterrupt())
+        prompts = iter(["質問です"])
+        output = []
+
+        result = chat_l04(client, input_fn=lambda _: next(prompts), output_fn=output.append)
+
+        self.assertEqual(result, 0)
+        self.assertTrue(any("入力を終了" in line for line in output))
+
     def test_cli_continues_after_sanitized_client_error(self):
         from botocore.exceptions import ClientError
 

@@ -48,6 +48,9 @@ def chat(client, include_history=True, input_fn=input, output_fn=print):
 
         try:
             answer = converse_turn(client, history, user_text, include_history=include_history)
+        except KeyboardInterrupt:
+            output_fn("入力を終了しました。")
+            return 0
         except (ClientError, BotoCoreError) as error:
             _report_error(error, output_fn)
             continue
