@@ -7,27 +7,33 @@ SYSTEM = [{"text": "日本語で、短い一文だけで回答してください
 
 
 def compare(client):
-    common = {
-        "modelId": model_id(),
-        "messages": user_message(PROMPT),
-        "inferenceConfig": {"temperature": 0.0, "topP": 1.0, "maxTokens": MAX_OUTPUT_TOKENS},
-    }
-    baseline = client.converse(**common)
-
-    system_changed = client.converse(**common, system=SYSTEM)
-
-    parameter_changed = client.converse(
-        modelId=model_id(),
-        messages=user_message(PROMPT),
-        inferenceConfig={"temperature": 0.8, "topP": 0.9, "maxTokens": MAX_OUTPUT_TOKENS},
+    model = model_id()
+    messages = user_message(PROMPT)
+    baseline = client.converse(
+        modelId=model,
+        messages=messages,
+        inferenceConfig={"temperature": 0.0, "topP": 1.0, "maxTokens": MAX_OUTPUT_TOKENS},
     )
-    return baseline, system_changed, parameter_changed
+
+    system_changed = client.converse(
+        modelId=model,
+        messages=messages,
+        system=SYSTEM,
+        inferenceConfig={"temperature": 0.0, "topP": 1.0, "maxTokens": MAX_OUTPUT_TOKENS},
+    )
+
+    temperature_changed = client.converse(
+        modelId=model,
+        messages=messages,
+        inferenceConfig={"temperature": 0.8, "topP": 1.0, "maxTokens": MAX_OUTPUT_TOKENS},
+    )
+    return baseline, system_changed, temperature_changed
 
 
 def main():
     configure_console()
     results = compare(create_client())
-    labels = ("基準", "system変更", "推論パラメータ変更")
+    labels = ("基準", "system変更", "temperature変更")
     for label, response in zip(labels, results):
         print(f"【{label}】")
         print(response_text(response))

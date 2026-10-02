@@ -6,17 +6,20 @@ PROMPT = "監視アラームのしきい値を決めるとき、最初に確認�
 
 
 def call_once(client):
+    messages = user_message(PROMPT)
     return client.converse(
         modelId=model_id(),
-        messages=user_message(PROMPT),
+        messages=messages,
         inferenceConfig={"maxTokens": MAX_OUTPUT_TOKENS},
     )
 
 
 def main():
     configure_console()
-    response = call_once(create_client())
-    print(response_text(response))
+    client = create_client()
+    response = call_once(client)
+    text = response_text(response)
+    print(text)
     return 0
 
 

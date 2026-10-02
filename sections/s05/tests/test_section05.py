@@ -37,13 +37,15 @@ class Lecture02Tests(unittest.TestCase):
 
         client.converse.assert_called_once()
         request = client.converse.call_args.kwargs
+        self.assertEqual(request["modelId"], s05_l02.model_id())
         self.assertEqual(request["messages"][0]["role"], "user")
+        self.assertEqual(request["messages"][0]["content"][0]["text"], s05_l02.PROMPT)
         self.assertEqual(request["inferenceConfig"]["maxTokens"], 96)
         self.assertEqual(s05_l02.response_text(result), "確認項目を一つ挙げます。")
 
 
 class Lecture03Tests(unittest.TestCase):
-    def test_compares_baseline_system_only_and_parameter_only(self):
+    def test_compares_system_only_and_temperature_only(self):
         client = Mock()
         client.converse.side_effect = [response("基準"), response("system"), response("parameter")]
 
@@ -51,12 +53,16 @@ class Lecture03Tests(unittest.TestCase):
 
         self.assertEqual(len(results), 3)
         self.assertEqual(client.converse.call_count, 3)
-        baseline, system_changed, parameter_changed = [call.kwargs for call in client.converse.call_args_list]
+        baseline, system_changed, temperature_changed = [call.kwargs for call in client.converse.call_args_list]
         self.assertNotIn("system", baseline)
         self.assertIn("system", system_changed)
         self.assertEqual(baseline["inferenceConfig"], system_changed["inferenceConfig"])
-        self.assertNotIn("system", parameter_changed)
-        self.assertNotEqual(baseline["inferenceConfig"], parameter_changed["inferenceConfig"])
+        self.assertNotIn("system", temperature_changed)
+        self.assertEqual(baseline["modelId"], temperature_changed["modelId"])
+        self.assertEqual(baseline["messages"], temperature_changed["messages"])
+        self.assertEqual(baseline["inferenceConfig"]["topP"], temperature_changed["inferenceConfig"]["topP"])
+        self.assertEqual(baseline["inferenceConfig"]["maxTokens"], temperature_changed["inferenceConfig"]["maxTokens"])
+        self.assertNotEqual(baseline["inferenceConfig"]["temperature"], temperature_changed["inferenceConfig"]["temperature"])
 
 
 class Lecture04Tests(unittest.TestCase):

@@ -38,7 +38,7 @@ cd sections/s05
 uv sync
 ```
 
-`uv sync`でboto3とその依存関係をこの演習の仮想環境に準備します。コードはboto3の標準認証情報プロバイダーを使い、認証情報を表示しません。リージョンは`AWS_DEFAULT_REGION`またはAWSプロファイルから選ばれます。
+`uv sync`でboto3とその依存関係をこの演習の仮想環境に準備します。各Python sampleでは`boto3.Session().client("bedrock-runtime")`を呼び、Bedrock Runtimeを呼び出すためのclient objectを作ります。boto3は現在のAWS設定から認証情報を解決し、環境変数または選択したAWSプロファイルの設定からリージョンを使います。ここで設定した`AWS_PROFILE`と`AWS_DEFAULT_REGION`がその選択を助けます。プログラムは認証情報を表示しません。
 
 ## L02: userメッセージを1回送る
 
@@ -48,7 +48,13 @@ uv run python s05_l02.py
 
 固定のuserメッセージをConverse APIへ1回送り、モデルのテキスト応答を表示します。表示はたとえば、監視アラームの調査時に確認する項目の短い説明です。文章や言い回しは実行ごとに異なる場合があります。
 
-`s05_l02.py`では`messages`に`role: "user"`と`content`のテキストを設定し、`client.converse()`を1回呼び出しています。メッセージを自分の質問に変えて再実行し、入力と応答の関係を確かめます。
+`s05_l02.py`では、`user_message(PROMPT)`が次の形のPythonのlistとdictionaryを作ります。外側のlistには会話の一通を入れ、そのdictionaryで`role`は送信者、`content`は本文のlist、`text`は質問文を表します。
+
+```python
+[{"role": "user", "content": [{"text": PROMPT}]}]
+```
+
+この`messages`とmodel IDを`client.converse()`へ渡すと、boto3がAWS SDKのAPI呼び出しを行い、結果をPythonのdictionaryとして返します。`response_text()`は`output`→`message`→`content`の順に値をたどり、本文のtext blockを取り出します。メッセージを自分の質問に変えて再実行し、入力から応答表示までの値の流れを確かめます。
 
 ## L03: systemメッセージと推論パラメータを比べる
 
@@ -56,13 +62,13 @@ uv run python s05_l02.py
 uv run python s05_l03.py
 ```
 
-同じ質問を次の3条件で送り、応答を並べて表示します。
+同じ質問・model IDで次の3条件を送り、応答を並べて表示します。
 
 1. 基準: systemメッセージなし、temperature `0.0`、topP `1.0`
 2. system変更: systemメッセージだけを追加し、推論パラメータは基準と同じ
-3. 推論パラメータ変更: systemメッセージを使わず、temperature `0.8`、topP `0.9`へ変更
+3. temperature変更: systemメッセージを使わず、temperatureだけを`0.8`へ変更し、topPは`1.0`のまま
 
-条件を一つずつ変えて出力を比べます。temperatureやsystemの変更で必ず特定の文面になるわけではありません。`s05_l03.py`の`SYSTEM`と`inferenceConfig`を見つけ、それぞれ一箇所だけ変更して再実行します。このLectureは比較のため3回呼び出します。
+1と2ではsystemメッセージだけが異なり、1と3ではtemperatureだけが異なります。`s05_l03.py`では各`client.converse()`の引数を名前付きで並べているので、固定するmodel IDとmessages、変更する`system`または`inferenceConfig`を見比べられます。temperatureは応答の生成方法に影響しますが、値を変えても特定の文章が必ず出るわけではありません。system文やtemperatureを一つずつ変更して再実行し、実際の応答を比べます。このLectureは比較のため3回呼び出します。
 
 ## L04: 応答、利用量、エラーを読む
 
@@ -70,9 +76,9 @@ uv run python s05_l03.py
 uv run python s05_l04.py
 ```
 
-成功時は応答本文、`stopReason`、`usage`の入力・出力・合計token数、`metrics.latencyMs`を表示します。利用量と応答時間は実際の応答に含まれる値を表示し、固定値ではありません。
+成功時の`response`は、本文を`output`→`message`→`content`→`text`から、`stopReason`は終了理由から読みます。`usage` dictionaryの`inputTokens`、`outputTokens`、`totalTokens`が入出力のtoken数、`metrics` dictionaryの`latencyMs`が応答時間の指標です。コードではそれぞれを`result`という別のdictionaryへ取り出してから表示します。利用量と応答時間は実際の応答に含まれる値で、固定値ではありません。
 
-失敗時はAWSエラーコードと、応答に含まれる場合はRequest IDを表示します。IAM権限、モデル利用可否、クォータ、プロファイル、リージョン、ネットワークを確認してください。エラー本文には環境固有情報が含まれる可能性があるため、コードは全文を画面へ出しません。調査時にも認証情報や個人情報が含まれないことを確認してから共有します。
+AWSがAPIエラーを返した場合はboto3の`ClientError`となり、コードはエラーコードと、あればRequest IDを表示します。呼び出しや通信などSDK側で失敗した場合は`BotoCoreError`として接続先などを確認する案内を表示します。どちらの失敗も終了コード`1`で終わり、成功は`0`です。IAM権限、モデル利用可否、クォータ、プロファイル、リージョン、ネットワークを確認してください。エラー本文には環境固有情報が含まれる可能性があるため、コードは全文を画面へ出しません。調査時にも認証情報や個人情報が含まれないことを確認してから共有します。
 
 ## 自動テスト
 

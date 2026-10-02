@@ -10,7 +10,11 @@ MAX_OUTPUT_TOKENS = 96
 
 
 def create_client():
-    """Create a Bedrock Runtime client from the active boto3 configuration."""
+    """Create an SDK object configured for Bedrock Runtime.
+
+    boto3 resolves the active profile's credentials and Region from the normal
+    AWS configuration chain; the program does not read or print credentials.
+    """
     return boto3.Session().client("bedrock-runtime")
 
 
@@ -28,11 +32,16 @@ def model_id():
 
 
 def user_message(text):
+    """Place text in the nested message shape expected by Converse."""
     return [{"role": "user", "content": [{"text": text}]}]
 
 
 def response_text(response):
-    """Read the first text block from a Converse response."""
+    """Follow output → message → content and return its first text block.
+
+    Converse returns dictionaries and lists. `output` contains a `message`,
+    whose `content` list contains one or more blocks such as `{"text": ...}`.
+    """
     content = response["output"]["message"]["content"]
     for block in content:
         if "text" in block:
