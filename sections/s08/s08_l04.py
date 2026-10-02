@@ -44,10 +44,13 @@ def request_messages(history, user_text, history_turns):
 
 
 def run_turn(client, history, user_text, history_turns):
+    # Keep the current question and append only the requested complete history pairs.
     sent = request_messages(history, user_text, history_turns)
+    # This local timer wraps the API call; Bedrock's latency is a separate response field.
     started = time.perf_counter()
     response = converse(client, sent, SYSTEM)
     client_elapsed_ms = (time.perf_counter() - started) * 1000
+    # Usage and service latency are returned by Bedrock; the client timer is measured here.
     answer = response_text(response)
     result = response_metrics(response)
     result.update({"text": answer, "messages_sent": len(sent), "client_elapsed_ms": round(client_elapsed_ms, 1)})
@@ -84,6 +87,7 @@ def main(argv=None):
         print(f"応答: {result['text']}")
         print("送信メッセージ数: {messages_sent} / 入力token: {input_tokens} / 出力token: {output_tokens} / 合計token: {total_tokens}".format(**result))
         print(f"Bedrock応答時間: {result['latency_ms']} ms（クライアント計測: {result['client_elapsed_ms']} ms）")
+        # Save the exchange only after its answer arrives; with two questions, Q2 can have at most Q1's one pair.
         history.extend([message("user", user_text), message("assistant", result["text"])])
     return 0
 

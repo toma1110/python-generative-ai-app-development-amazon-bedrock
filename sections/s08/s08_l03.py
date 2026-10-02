@@ -31,8 +31,11 @@ def build_user_text(case_text, prompt):
 
 def compare(client, case_text):
     results = []
+    # Hold the case text and shared request settings constant; compare only the user prompt.
     for label, prompt in (("変更前", BASELINE_PROMPT), ("変更後", REVISED_PROMPT)):
+        # The prompt and same source note become one user message for this API call.
         response = converse(client, [message("user", build_user_text(case_text, prompt))], SYSTEM)
+        # Text, token usage, and Bedrock latency all come from this response.
         results.append({"label": label, "text": response_text(response), **response_metrics(response)})
     return results
 

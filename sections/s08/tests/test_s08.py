@@ -33,6 +33,13 @@ class Section08Tests(unittest.TestCase):
         self.assertEqual(client.converse.call_count, 2)
         self.assertEqual([item["text"] for item in results], ["before", "after"])
         self.assertEqual(results[1]["input_tokens"], 25)
+        before, after = [call.kwargs for call in client.converse.call_args_list]
+        self.assertEqual(before["system"], after["system"])
+        self.assertEqual(before["modelId"], after["modelId"])
+        self.assertEqual(before["inferenceConfig"], after["inferenceConfig"])
+        self.assertNotEqual(before["messages"], after["messages"])
+        for request in (before, after):
+            self.assertIn("同じケース", request["messages"][0]["content"][0]["text"])
 
     def test_history_keeps_complete_recent_pairs(self):
         history = [message("user", "a"), message("assistant", "A"),
@@ -72,6 +79,7 @@ class Section08Tests(unittest.TestCase):
         second_request = client.converse.call_args_list[1].kwargs["messages"]
         self.assertEqual([item["role"] for item in second_request], ["user", "assistant", "user"])
         self.assertIn("架空の教材データ", second_request[-1]["content"][0]["text"])
+        self.assertIn(QUESTIONS[1], second_request[-1]["content"][0]["text"])
 
     def test_args_reject_negative_history_count(self):
         with self.assertRaises(SystemExit):
