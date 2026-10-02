@@ -4,6 +4,7 @@ import requests
 
 
 def main() -> None:
+    print(f"Python executable: {sys.executable}")
     print(f"Virtual environment: {sys.prefix}")
     print(f"Base Python: {sys.base_prefix}")
     print(f"requests version: {requests.__version__}")
