@@ -1,87 +1,252 @@
 # Section 03: 生成AIアプリで使うPythonの基礎
 
-このSectionでは、架空の障害調査メモを題材に、入力と表示を変数で変え、複数の確認項目を条件に応じて処理し、関数へ分け、最後にJSONファイルから読み込みます。Amazon BedrockやAWSサービスへは接続しません。
+このSectionでは、架空の障害調査メモを使い、入力した値がPythonの中をどう進み、画面の結果になるかを確かめます。L02からL05へ進むと、値・複数データ・関数・ファイル入力を順に扱います。AWSやAmazon Bedrockには接続しません。
 
-## 事前準備
+## 準備
 
 - Python 3.11以降
-- リポジトリをダウンロードまたはcloneし、リポジトリ最上位でターミナルを開けること
+- [公開hands-on repository](https://github.com/toma1110/python-generative-ai-app-development-amazon-bedrock)をcloneします。
 
-Pythonのバージョンを確認します。
+```text
+git clone https://github.com/toma1110/python-generative-ai-app-development-amazon-bedrock.git
+cd python-generative-ai-app-development-amazon-bedrock
+```
+
+ダウンロードする場合は、リンク先の「Code」からZIPを取得して展開し、そのフォルダーをターミナルで開きます。以降のコマンドはrepository最上位で実行します。
 
 ```text
 python --version
 ```
 
-macOS / Linuxで`python`が見つからない場合は`python3 --version`を使います。以降の例も必要に応じて`python`を`python3`に読み替えてください。
+macOS / Linuxで`python`が見つからない場合は`python3 --version`を使います。以降も必要に応じて`python`を`python3`に読み替えてください。
+
+コマンド例はすべてrepository最上位で実行します。`cd`は作業場所を移すコマンドです。移動後の場所が分からなくなったら`pwd`（PowerShellでは`Get-Location`）で確認してください。
 
 ## L02: 変数と文字列で入力・出力を扱う
 
 ```text
-cd sections/s03/l02
-python main.py
+python sections/s03/l02/main.py
 ```
 
-「SREさん、API応答の確認を始めます。」と表示されます。`main.py`の`audience`または`check_item`の値を変更してもう一度実行し、f-stringで組み立てた表示内容も変わることを確認します。
-
-## L03: list・dict・if・forでデータを処理する
-
-リポジトリ最上位へ戻ってから実行します。
+結果:
 
 ```text
-cd ../../..
-cd sections/s03/l03
-python main.py
+SREさん、API応答の確認を始めます。
 ```
 
-3件の確認項目が表示されます。`status`が`要確認`の項目では追加確認の案内が出ます。`checks`の値を一つ追加または変更し、listの各dictをforで処理し、ifの結果によって表示が変わることを確かめます。
+`main.py`は上から読むと、値が次の順に移動します。
+
+```text
+"SRE" ──代入──> audience ─┐
+                          ├─ f-string ─> message ─> print ─> 画面
+"API応答" ─代入─> check_item ┘
+```
+
+`=`の右側を左側の変数名へ代入します。`audience`や`check_item`は値に付けた名前です。`f"...{変数名}..."`は、波括弧の場所へその時点の値を埋め込んだ文字列を作ります。`print(message)`はその文字列を画面へ表示します。
+
+### 1箇所だけ変える
+
+`audience = "SRE"`を`audience = "運用担当"`に変えて、同じコマンドをもう一度実行します。最初の表示語だけが変わり、`check_item`の値はそのままです。代入元を変えると、その値を使う後続のf-stringが変わることを確認できます。
+
+### よくある失敗
+
+- `NameError`は、変数名の打ち間違いや、代入より前に使ったときに起きます。代入行と波括弧内の名前が同じか確認します。
+- `SyntaxError`は、引用符や`{}`を消したときに起きます。f-stringの先頭に`f`があるか、文字列の引用符が対になっているか確認します。
+- 文字を画面に出したいだけなら`print`を使います。関数から別の処理へ値を渡す`return`とは役割が異なり、L04で扱います。
+
+## L03: list・dict・for・ifでデータを処理する
+
+```text
+python sections/s03/l03/main.py
+```
+
+結果:
+
+```text
+API応答: 確認済み
+エラーログ: 要確認
+  原文ログで発生時刻とエラー内容を確認します。
+再試行回数: 確認済み
+```
+
+`checks`は角括弧`[]`で囲まれたlistで、複数の確認項目を順番に持ちます。各項目は波括弧`{}`で囲まれたdictです。dictでは`"name"`や`"status"`がkey（値を探す名前）、`"API応答"`や`"確認済み"`がvalue（その中身）です。
+
+`for check in checks:`はlistから1件を取り出すたびに、そのdictを`check`へ入れて、字下げされた処理を実行します。`check["name"]`のようにkeyを指定するとvalueを取り出せます。`if check["status"] == "要確認":`は現在の1件だけを比較し、条件が真のときだけ追加確認を表示します。
+
+### 1箇所だけ変える
+
+2件目の`"要確認"`を`"確認済み"`に変えて実行します。項目名と状態の表示は残りますが、追加確認の行だけが出なくなります。forが3件すべてを処理し、ifが各件の状態で結果を分けることを確認してください。
+
+### よくある失敗
+
+- `KeyError`は、dictに存在しないkeyを書いたときに起きます。データの`"name"` / `"status"`と、`check[...]`の綴りをそろえます。
+- `IndentationError`は、forやifの下の行の字下げがそろわないときに起きます。コロンの次の行を同じ幅だけ字下げします。
+- Pythonでは`=`は代入、`==`は値の比較です。ifの条件を`=`にすると構文エラーになります。
 
 ## L04: 関数とimportで処理を分ける
 
 ```text
-cd ../../..
-cd sections/s03/l04
-python main.py
+python sections/s03/l04/main.py
 ```
 
-`check_data.py`から確認データを読み込み、`main.py`の関数で状態を分類して表示します。`classify_check`の条件を変えると、処理結果が変わります。`get_checks`（入力）、`classify_check`（処理）、`show_check`（表示）がどの役割かを見つけてください。
+結果:
 
-`ModuleNotFoundError`が出た場合は、`sections/s03/l04`を作業フォルダーにしているか、`main.py`と`check_data.py`が同じフォルダーにあるかを確認します。
+```text
+API応答: 確認済み
+エラーログ: 追加確認が必要
+再試行回数: 確認済み
+```
+
+`def classify_check(check):`は関数を定義します。定義は処理の手順に名前を付けるだけで、その行に来ても中身は実行されません。別ファイルの`check_data.py`にある`get_checks()`を`import`し、`main()`の中から呼び出すと、データのlistが返ります。
+
+1件ずつの流れは次のとおりです。
+
+```text
+check dict ─引数として渡す─> classify_check(check)
+                              └─ returnで分類文字列を返す ─> result
+resultとname ─> show_check ─print─> 画面
+```
+
+`return "追加確認が必要"`は呼び出し元へ値を返すので、`result`へ代入して後で使えます。`print(...)`は画面へ出すだけで、表示した文字列を呼び出し元へ返しません。`show_check`は表示、`classify_check`は分類と役割を分けています。最後の`if __name__ == "__main__":`で`main()`を呼び、実行を開始します。
+
+### 1箇所だけ変える
+
+`classify_check`の条件にある`"needs_review"`を`"ok"`へ変えて実行します。今度は確認済み項目が「追加確認が必要」と表示されます。比較する値を変えると分類結果が変わることを確かめたら、元の`"needs_review"`へ戻します。
+
+### よくある失敗
+
+- 実行しても何も表示されないときは、関数を定義しただけで呼び出していない可能性があります。`main()`とその呼び出し条件を確認します。
+- `ModuleNotFoundError`は`check_data.py`を見つけられない状態です。2ファイルが同じ`l04`フォルダーにあるか、READMEのコマンドをrepository最上位から実行したか確認します。
+- `return`を`print`に変えると、呼び出し元の`result`には値が入りません。分類結果を後で使うときは`return`のままにします。
 
 ## L05: ファイルとJSONを読み、例外を扱う
 
+このLectureでは、次の段階を順にたどります。
+
+まず完成版を実行する前に、Pythonの対話画面（REPL）でファイルの内容がデータへ変わる様子を追います。repository最上位で`python -X utf8`（macOS / Linuxでは必要に応じて`python3 -X utf8`）を実行すると、`>>>`が表示されます。`-X utf8`はPythonの入出力をUTF-8にする指定です。以下の行を順に入力し、`>>>`は入力しません。
+
+### 1. 固定ファイルを文字列として読む
+
+```pycon
+>>> from pathlib import Path
+>>> path = Path("sections/s03/l05/cases.json")
+>>> text = path.read_text(encoding="utf-8")
+>>> print(text)
+[
+  {"name": "API応答", "status": "ok"},
+  {"name": "エラーログ", "status": "needs_review"},
+  {"name": "再試行回数", "status": "ok"}
+]
+```
+
+ここではファイル内容はまだPythonのlistではなく、`text`という文字列です。`Path`はファイルの場所を表し、`read_text`がその内容を読みます。
+
+### 2. JSON文字列をPythonのlist/dictへ変換する
+
+```pycon
+>>> import json
+>>> checks = json.loads(text)
+>>> type(checks).__name__
+'list'
+>>> type(checks[0]).__name__
+'dict'
+```
+
+JSONの配列がPythonのlistに、その中のオブジェクトがdictに変わりました。ファイルを読む段階と、JSONとして解釈する段階は別です。
+
+### 3. dictの値を取り出して使う
+
+```pycon
+>>> first = checks[0]
+>>> first["name"]
+'API応答'
+>>> first["status"]
+'ok'
+>>> for check in checks:
+...     print(f"{check['name']}: {check['status']}")
+...
+API応答: ok
+エラーログ: needs_review
+再試行回数: ok
+```
+
+listから`checks[0]`で最初のdictを取り出し、dictのkeyで値を選びます。forはlist内のdictを1件ずつ`check`へ渡します。対話画面を終えるときは`exit()`を入力します。
+
+### 4. 完成版で表示と失敗対応を確認する
+
+ここまでの処理に、値の検査、利用者向け表示、例外対応を加えた完成版を実行します。
+
+1. `Path(__file__).with_name("cases.json")`は、実行中の`main.py`と同じフォルダーにある固定ファイルを指します。
+2. `json.loads(text)`でJSON文字列をPythonの値に変換します。
+3. 最上位がlistか、項目がdictか、`name`と`status`が使える型・値か確かめてから、表示に使います。
+4. `try` / `except`でファイルやJSONの失敗を受け取り、原因と確認方法を表示します。`sys.argv`はコマンドに続けて渡したファイル名を受け取ります。
+
+通常の入力を実行します。
+
 ```text
-cd ../../..
+python sections/s03/l05/main.py
+```
+
+出力:
+
+```text
+API応答: 確認済み
+エラーログ: 要確認
+  原文ログで発生時刻とエラー内容を確認します。
+再試行回数: 確認済み
+```
+
+`cases.json`の2件目の`"needs_review"`を`"ok"`へ変えて実行し、追加確認の行がなくなることを確かめます。演習後は元の値へ戻します。
+
+### 失敗を順に確認する
+
+ファイルがない場合:
+
+```text
+python sections/s03/l05/main.py missing.json
+```
+
+`missing.json`が見つからない旨が表示され、終了コード1で終わります。コマンドにファイル名を渡した場合、相対pathはターミナルの現在地から探します。確認方法は`Get-Location`（macOS/Linuxは`pwd`）です。引数を省略した通常実行では、`main.py`と同じ場所の`cases.json`を使います。
+
+JSONの書き方が誤っている場合は、同じフォルダーに`broken.json`を作り、`{`だけを書いて保存します。
+
+```text
+python sections/s03/l05/main.py sections/s03/l05/broken.json
+```
+
+上のコマンドはrepository最上位から実行します。JSONの行番号を含む案内が表示されます。確認後、作成した`broken.json`を削除します。`cases.json`は演習用入力なので残してください。
+
+JSONとしては正しくても、必要な値の型や選択値が違う場合があります。たとえば`cases.json`の`status`を`"unknown"`にすると、`ok`または`needs_review`にする案内が表示されます。`status`を配列にするなど文字列以外を渡しても、Pythonの例外tracebackを見せずに案内します。修正後は最初の正常実行と同じ出力に戻ることを確認します。
+
+### よくある失敗
+
+- `FileNotFoundError`相当の案内: ファイル名と現在地を確認します。コマンドに渡した相対pathは現在地基準です。
+- JSON形式の案内: 二重引用符、カンマ、波括弧、配列の角括弧を確認します。JSONでは末尾の余分なカンマを使えません。
+- name/statusの案内: 最上位が配列、その中がオブジェクトか、`name`が空でない文字列か、`status`が許可された文字列かを確認します。
+- `python`が見つからない: Pythonをインストールし、新しいターミナルで`python --version`を確認します。
+
+このコードの`try`は失敗する可能性のある読み込み・変換を囲み、`except`は種類に応じた案内を返します。`return 1`は呼び出し元へ失敗を知らせ、最後の`SystemExit`がその値をOSの終了コードにします。正常時は0です。
+
+## 自分で変更した箇所を説明する
+
+- L02: どの代入値を変えると、画面のどの部分が変わるか
+- L03: listの何件をforが処理し、どのstatusで追加行が表示されるか
+- L04: 引数・return・printがそれぞれどの値や画面を受け持つか
+- L05: ファイル文字列がどの段階でlist/dictになり、どの検査が失敗を案内するか
+
+## 自動テスト
+
+L05フォルダーへ移動して実行します。
+
+```text
 cd sections/s03/l05
-python main.py
+python -m unittest -v
 ```
 
-`cases.json`の3件を読み込み、確認項目を表示します。JSONは項目の配列で、各項目に空でない文字列の`name`と、`ok`または`needs_review`の`status`が必要です。`main.py`はファイルがない場合、UTF-8で読めない場合、JSONの構文や項目の形が正しくない場合を分けて案内します。失敗時もPythonのtracebackをそのまま出すのではなく、何を確認するかを短く表示します。
-
-存在しないファイルを指定して、ファイル読み込み失敗を確認できます。
-
-```text
-python main.py missing.json
-```
-
-JSONの構文エラーも確認するには、`cases.json`を別の場所へ一時的に移すのではなく、VS Codeなどで同じフォルダーに`broken.json`を新規作成し、`{`だけを書いて保存します。そのコピーを指定して実行します。
-
-```text
-python main.py broken.json
-```
-
-確認後、`broken.json`を削除して構いません。`cases.json`は教材の入力なので残してください。
-
-## 想定と異なる場合
-
-- `python` / `python3`が見つからない: Pythonをインストールして新しいターミナルを開き、バージョン確認をやり直します。
-- Windowsの古いコンソールで日本語が正しく表示されない: VS Codeの統合ターミナルまたはUTF-8に対応したWindows Terminalを使います。
-- `can't open file`またはJSONファイルが見つからない: `pwd`（PowerShellでは`Get-Location`）で現在地を確認し、README記載のLectureフォルダーへ移動します。
-- L04でimportに失敗する: `main.py`と`check_data.py`が同じ`l04`フォルダーにあることを確認します。
-- L05でJSONの形式エラーが出る: ファイル名、文字列の二重引用符、カンマの位置を確認します。JSONでは末尾の余分なカンマも使えません。
+7件のテストでJSON値の受け入れ、型・値の誤り、ファイル読み込み、ファイル不在、JSON構文エラーを確認します。テスト後は`cd ../../..`でrepository最上位へ戻れます。
 
 ## 料金と後片付け
 
-すべてのプログラムはローカルで動き、AWS resource、AWS認証情報、Bedrock API、外部ライブラリを使いません。AWS利用料金やライブラリ取得費用は発生しません。各コマンドで作るファイルもありません。演習後はプログラムを終了し、L05で作った`broken.json`があれば削除します。
+すべてローカルで実行し、AWS resource、AWS認証情報、Bedrock API、外部ライブラリを使いません。AWS料金やライブラリ取得費用は発生せず、演習コードも追加ファイルを作りません。L05で作った`broken.json`があれば削除します。
 
-この教材コードはリポジトリのルートにある[MIT License](../../LICENSE)の条件で利用できます。
+この教材コードはrepositoryのルートにある[MIT License](../../LICENSE)の条件で利用できます。
