@@ -3,35 +3,30 @@
 import sys
 
 import boto3
-from botocore.exceptions import BotoCoreError
+from botocore.exceptions import BotoCoreError, ClientError
 
 
-class RegionNotConfiguredError(Exception):
-    """Raised when no AWS Region is available in the active configuration."""
-
-
-def read_target(session=None):
-    """Return the active account ID and Region without exposing credentials."""
-    session = session or boto3.Session()
-    region = session.region_name
-    if not region:
-        raise RegionNotConfiguredError
-
-    identity = session.client("sts", region_name=region).get_caller_identity()
-    return identity["Account"], region
+def read_target(session, region):
+    """Return the account ID selected by this session and Region."""
+    sts_client = session.client("sts", region_name=region)
+    response = sts_client.get_caller_identity()
+    account_id = response["Account"]
+    return account_id
 
 
 def main():
     try:
-        account_id, region = read_target()
-    except RegionNotConfiguredError:
-        print(
-            "リージョンが設定されていません。AWS_DEFAULT_REGIONまたは"
-            "プロファイルのリージョン設定を確認してください。",
-            file=sys.stderr,
-        )
-        return 1
-    except BotoCoreError:
+        session = boto3.Session()
+        region = session.region_name
+        if not region:
+            print(
+                "リージョンが設定されていません。AWS_DEFAULT_REGIONまたは"
+                "プロファイルのリージョン設定を確認してください。",
+                file=sys.stderr,
+            )
+            return 1
+        account_id = read_target(session, region)
+    except (BotoCoreError, ClientError):
         print(
             "AWS接続を確認できませんでした。プロファイル、ログイン状態、"
             "リージョン、ネットワークを確認してください。",
