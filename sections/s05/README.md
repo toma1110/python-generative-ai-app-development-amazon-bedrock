@@ -54,7 +54,13 @@ uv run python s05_l02.py
 [{"role": "user", "content": [{"text": PROMPT}]}]
 ```
 
-この`messages`とmodel IDを`client.converse()`へ渡すと、boto3がPythonの値をConverse APIのJSONリクエストにして送信し、JSONレスポンスをPythonのdictionaryやlistにして返します。つまり、ここではJSON文字列を自分で組み立てず、Pythonのlist/dictionaryを使います。`response_text()`は`output`→`message`→`content`の順に値をたどり、本文のtext blockを取り出します。メッセージを自分の質問に変えて再実行し、入力から応答表示までの値の流れを確かめます。
+この`messages`とmodel IDを`client.converse()`へ渡すと、boto3がPythonの値をConverse APIのJSONリクエストにして送信し、JSONレスポンスをPythonのdictionaryやlistにして返します。つまり、ここではJSON文字列を自分で組み立てず、Pythonのlist/dictionaryを使います。応答の形は次のようになります（構造を示す例で、`text`の内容は実行ごとに変わります）。
+
+```json
+{"output": {"message": {"content": [{"text": "（モデルが生成した応答文）"}]}}}
+```
+
+`call_once`は`client.converse()`の戻り値を返し、`main`はそれを`response`として受け取ります。`response_text(response)`は`output`→`message`→`content`の順にたどって`content` list内の最初のtext blockを取り出し、その文字列が`text`に代入されます。最後に`print(text)`がその内容を画面に表示します。メッセージを自分の質問に変えて再実行し、入力から応答表示までの値の流れを確かめます。
 
 ## L03: systemメッセージと推論パラメータを比べる
 
