@@ -9,23 +9,23 @@ import main
 
 
 class ReadTargetTests(unittest.TestCase):
-    def test_returns_account_and_configured_region(self):
+    def test_returns_account_for_configured_region(self):
         sts = Mock()
         sts.get_caller_identity.return_value = {
-            "Account": "example-account-id",
+            "Account": "123456789012",
         }
         session = Mock()
         session.client.return_value = sts
 
         self.assertEqual(
-            main.read_target(session, "ap-northeast-1"), "example-account-id"
+            main.read_target(session, "ap-northeast-1"), "123456789012"
         )
         session.client.assert_called_once_with("sts", region_name="ap-northeast-1")
         sts.get_caller_identity.assert_called_once_with()
 
 
 class MainTests(unittest.TestCase):
-    @patch("main.read_target", return_value="example-account-id")
+    @patch("main.read_target", return_value="123456789012")
     @patch("main.boto3.Session")
     def test_prints_only_account_and_region(self, session_factory, _read_target):
         session_factory.return_value.region_name = "ap-northeast-1"
@@ -36,7 +36,7 @@ class MainTests(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertEqual(
             stdout.getvalue(),
-            "接続先アカウント: example-account-id\n接続先リージョン: ap-northeast-1\n",
+            "接続先アカウント: 123456789012\n接続先リージョン: ap-northeast-1\n",
         )
 
     @patch("main.read_target", side_effect=NoCredentialsError())

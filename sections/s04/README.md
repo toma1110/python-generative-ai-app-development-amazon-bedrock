@@ -53,16 +53,20 @@ CLIの設定をPythonへ渡すのではなく、Python内のboto3もAWSの設定
 
 get_caller_identity()はAWSへ接続先を問い合わせ、結果をPythonの辞書として返します。response["Account"]は辞書のAccountというkeyからAccount IDを取り出す書き方です。今回のプログラムは、ここで取り出した値とリージョンだけを表示します。
 
+ここではS03で学んだ変数、関数、辞書を使っています。`main()`が`session`と`region`を変数に入れて`read_target()`へ渡し、関数がresponse辞書から`account_id`を取り出して返します。呼び出し元の`main()`は、その値と`region`を`print()`で表示します。Account IDはSTS応答の`Account`から、Regionはboto3 Sessionの設定から来ます。STS応答自体にRegionは含まれません。
+
 認証情報は「誰としてAWSへ接続するか」を示し、IAM権限は「そのIDで何を実行できるか」を制御します。アプリ固有の外部サービス用パスワードやAPIトークンは別の秘密情報です。必要なアプリではSecrets Managerなどへ保存し、AWSの認証情報でその値を取得する権限を管理します。この演習では秘密情報を作成・取得しません。
 
-## 期待する結果
+## 実行結果と接続先の判断
 
-成功すると、次のような2行が表示されます。Account IDは実行したAWSアカウントごとに異なります。
+実AWSで上のコマンドを実行すると、プログラムはSTSから受け取ったAccount IDと、boto3 Sessionから選んだRegionを次の形式で表示します。下の `123456789012` は、テストで使う架空の12桁IDです。ユニットテストではAWS呼び出しをmockし、実際に `main()` を実行してstdoutがこの2行になることを確認しました。この出力例はオフラインmockの結果で、実AWSの実行結果ではありません。
 
 ```text
-接続先アカウント: <12桁のAWS Account ID>
+接続先アカウント: 123456789012
 接続先リージョン: ap-northeast-1
 ```
+
+実際の実行後は、1行目のAccount IDが選んだAWSアカウントのIDと完全に一致すること、2行目が演習で使う予定の `ap-northeast-1` であることを確認します。IDが違う場合や、予定Regionと違う場合は次の操作へ進まず、選んだプロファイルとシェルの設定を見直してください。例の12桁IDを自分のAWSアカウントだと見なさないでください。
 
 この確認はAWSの読み取り専用APIを1回呼び出します。`GetCallerIdentity`にはIAM権限の追加が不要です。AWS resourceを作成・変更せず、Bedrockのモデルも呼び出しません。
 
