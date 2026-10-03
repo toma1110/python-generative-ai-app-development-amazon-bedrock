@@ -9,7 +9,7 @@ STATUS_LABELS = {"ok": "確認済み", "needs_review": "要確認"}
 
 
 def validate_checks(value: Any) -> list[dict[str, str]]:
-    """JSONから得た値が、演習で使えるlist/dictかを確かめる。"""
+    """JSON由来の値を検査し、不正な場合はValueErrorを発生させる。"""
     if not isinstance(value, list):
         raise ValueError("最上位は配列にしてください。")
 
@@ -31,7 +31,7 @@ def validate_checks(value: Any) -> list[dict[str, str]]:
 
 
 def load_checks(path: Path) -> tuple[list[dict[str, str]] | None, str | None]:
-    """ファイル→JSON→型・値の順に確認し、失敗時は利用者向け案内を返す。"""
+    """失敗を捕捉して案内文字列を返し、正常時は検証済みlistを返す。"""
     # Pathはファイルの場所を表す値。read_textでUTF-8の文字列を読み取ります。
     try:
         text = path.read_text(encoding="utf-8")
@@ -52,6 +52,7 @@ def load_checks(path: Path) -> tuple[list[dict[str, str]] | None, str | None]:
     try:
         checks = validate_checks(value)
     except ValueError as error:
+        # validate_checksが発生させた例外をここで捕捉し、画面用の文にします。
         return None, f"{path.name}: {error}"
 
     return checks, None
@@ -68,6 +69,7 @@ def main(arguments: list[str] | None = None) -> int:
 
     checks, error = load_checks(path)
     if error is not None:
+        # load_checksの戻り値は、ここでprintして初めて画面に出ます。
         print(error)
         return 1
 
