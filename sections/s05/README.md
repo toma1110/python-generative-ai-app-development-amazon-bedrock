@@ -54,7 +54,7 @@ uv run python s05_l02.py
 [{"role": "user", "content": [{"text": PROMPT}]}]
 ```
 
-この`messages`とmodel IDを`client.converse()`へ渡すと、boto3がPythonの値をConverse APIのJSONリクエストにして送信し、JSONレスポンスをPythonのdictionaryやlistにして返します。つまり、ここではJSON文字列を自分で組み立てず、Pythonのlist/dictionaryを使います。応答の形は次のようになります（構造を示す例で、`text`の内容は実行ごとに変わります）。
+`client.converse()`には`modelId`と`messages`をPythonの引数として渡します。boto3は`modelId`をConverse APIのURI（`/model/{modelId}/converse`）に使い、`messages`、`system`、`inferenceConfig`などの本文フィールドはPythonの値からJSONリクエストにして送信します。JSONレスポンスはPythonのdictionaryやlistにして返るため、JSON文字列を自分で組み立てる必要はありません。応答の形は次のようになります（構造を示す例で、`text`の内容は実行ごとに変わります）。
 
 ```json
 {"output": {"message": {"content": [{"text": "（モデルが生成した応答文）"}]}}}
