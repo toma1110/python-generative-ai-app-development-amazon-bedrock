@@ -18,22 +18,27 @@ cd python-generative-ai-app-development-amazon-bedrock
 
 ZIPで取得する場合は、GitHubのCodeメニューから「Download ZIP」を選び、展開したフォルダーを開きます。すでにclone済みの場合は、リポジトリ最上位へ移動してください。
 
-認証情報をコードや`.env`へコピーしません。IAM Identity Centerプロファイルを使う場合は先にログインします。
+認証情報をコードや`.env`へコピーしません。IAM Identity Centerプロファイルを使う場合は、`<profile-name>`を自分が設定したプロファイル名に置き換えてからログインします。山括弧を含む例をそのままコマンドへ貼り付けないでください。
 
 ```text
 aws sso login --profile <profile-name>
 ```
 
-リポジトリ最上位から、使用するAWSプロファイルとリージョンを設定してください。モデルIDは既定で`amazon.nova-lite-v1:0`ですが、対象リージョンとアカウントで使えるモデルを確認し、必要なら`BEDROCK_MODEL_ID`で変更します。モデルIDを固定条件として扱わないでください。
+リポジトリ最上位から、使用するAWSプロファイルとリージョンを設定してください。下の基本手順では`BEDROCK_MODEL_ID`を設定しないため、コードに定義された既定値`amazon.nova-lite-v1:0`を使います。この既定値が対象リージョンとアカウントで使えることを確認してください。別モデルを使う場合は、各環境の任意設定欄だけを使います。そこに書く値は、対象リージョンとアカウントで利用可能な実際のmodel IDへ置き換えてください。placeholderのまま設定しないでください。
 
 Windows PowerShell:
 
 ```powershell
 $env:AWS_PROFILE = "<profile-name>"
 $env:AWS_DEFAULT_REGION = "ap-northeast-1"
-$env:BEDROCK_MODEL_ID = "<available-model-id>" # 任意。省略するとコードの既定値を使います
 cd sections/s08
 uv sync
+```
+
+別モデルを使う場合だけ、下の行のコメントを外し、値を利用可能なmodel IDへ置き換えます。基本手順を実行するだけなら設定不要です。
+
+```powershell
+# $env:BEDROCK_MODEL_ID = "実際に利用できるmodel-id"
 ```
 
 macOS / Linux:
@@ -41,9 +46,16 @@ macOS / Linux:
 ```sh
 export AWS_PROFILE="<profile-name>"
 export AWS_DEFAULT_REGION="ap-northeast-1"
-export BEDROCK_MODEL_ID="<available-model-id>" # 任意。省略するとコードの既定値を使います
 cd sections/s08
 uv sync
+```
+
+`<profile-name>`は自分のAWS CLIプロファイル名へ置き換えてください。別モデルを使う任意設定はどちらの基本手順にも含めていません。未設定時は`model_id()`がコード内の既定値を返し、有効なmodel IDを任意設定した場合だけその値を使います。
+
+別モデルを使う場合だけ、下の行のコメントを外し、値を利用可能なmodel IDへ置き換えます。基本手順を実行するだけなら設定不要です。
+
+```sh
+# export BEDROCK_MODEL_ID="実際に利用できるmodel-id"
 ```
 
 ## L03: 同じ事例でプロンプト変更前後を比べる
@@ -54,13 +66,26 @@ uv run python s08_l03.py
 
 `sample/incident-note.txt`は教材用の架空データです。比較する前に、`s08_l03.py`の`BASELINE_PROMPT`と`REVISED_PROMPT`を見比べてください。コードはどちらにも同じメモを付けてuserメッセージを作り、順にBedrockへ1回ずつ送ります。
 
+最初の比較はこの変更です。`BASELINE_PROMPT`は変更前、`REVISED_PROMPT`は変更後の依頼文です。
+
+```python
+# 変更前
+BASELINE_PROMPT = "この障害調査メモを短く要約してください。"
+
+# 変更後
+REVISED_PROMPT = (
+    "障害調査メモを読み、確認できる事実と未確認事項を分けてください。"
+    "原文にない原因や影響範囲を推測で断定せず、各事実に時刻を添えてください。"
+)
+```
+
 この比較で変えるのはuserメッセージ内の依頼文だけです。架空メモ、systemメッセージ、モデルID、リージョン、出力上限（160 tokens）は固定します。モデルIDとリージョンは準備時に選んだ値を両方の呼び出しで使います。モデルやリージョンまで同時に変えると、出力差がどの変更によるものか判断しにくくなります。
 
-コードの流れは、`build_user_text`で依頼文とメモをつなぐ → `message`でBedrock用のuserメッセージにする → `compare`から`converse`を2回呼ぶ → 応答本文と応答の`usage` / `metrics.latencyMs`を取り出して表示する、です。利用量はBedrock応答の値で、各呼び出しの入力・出力・合計tokensを表します。`latencyMs`もBedrock応答に含まれるサービス側の時間です。ここではクライアント全体の経過時間は測っていません。
+コードでは`main()`がsample fileを文字列`case_text`として読み、同じ値を`compare()`へ渡します。`build_user_text()`が依頼文と`case_text`をつなぎ、`message()`がuser messageのdictを作ります。`compare()`は同じsystem指示と設定で2回`converse()`を呼び、各応答を`response`として受け取ります。`response_text(response)`は生成文、`response_metrics(response)`は`input_tokens`、`output_tokens`、`total_tokens`、`latency_ms`を取り出します。これらを`label`と一緒にdictへ入れ、`results`というlistに追加して表示します。表示文と数値はその場のBedrock実行結果で、READMEやスライドに固定の生成文・実測値はありません。`latency_ms`はBedrock応答内のサービス側の時間で、L03ではクライアント全体の経過時間を測っていません。
 
 二つの出力を実際に読み、原文で裏付けられる事実・時刻、欠けた情報、原文にない原因や影響範囲の断定を比べます。指示どおりの文面になったかだけでは決めず、根拠が保たれ、必要な情報を落とさず、確認できないことを断定しないかを見て採用・修正・保留を選びます。usageと応答時間は出力の品質点ではなく、同じ設定でのコスト・速度の参考値として一緒に記録します。
 
-次に、自分で`REVISED_PROMPT`の依頼文を一か所だけ変えて保存し、同じコマンドをもう一度実行してください。例えば「時刻を添えてください」を「時刻を添えて箇条書きで示してください」に変えます。架空メモ、`BASELINE_PROMPT`、systemメッセージ、モデル、リージョン、出力上限は変えず、編集前後の出力とusage・応答時間を記録して比べます。出力は実行ごとにも変わるため、一度の結果だけでプロンプト変更が品質を改善したと断定せず、どの差が原文で確かめられたかを説明してください。
+次に、自分で`REVISED_PROMPT`の依頼文を一か所だけ変えて保存し、同じコマンドをもう一度実行してください。例えば「各事実に時刻を添えてください」を「各事実に時刻を添えて箇条書きで示してください」に変えます。架空メモ、`BASELINE_PROMPT`、systemメッセージ、モデル、リージョン、出力上限は変えません。各実行の中で表示される変更前と変更後を一組として比べ、本文・usage・応答時間を記録します。出力は実行ごとにも変わるため、別の実行どうしの出力差をプロンプト変更だけの効果と決めつけず、どの差が原文で確かめられたかを説明してください。
 
 出力をメモと照合し、少なくとも次を記録してください。
 
@@ -84,6 +109,8 @@ uv run python s08_l04.py --history-turns 2
 
 `run_turn`は送信するメッセージを組み立てた後、`time.perf_counter()`で`converse`の前後を計り、クライアント側経過時間を出します。応答から本文・token利用量・Bedrock側`metrics.latencyMs`を取り出します。Bedrock側時間とクライアント側時間は計測範囲が違うため、同じ値として扱わないでください。
 
+値の流れは、`sample_text`と質問から`user_text`（文字列）を作る → `history`（userとassistantのmessage dictを並べたlist）を`request_messages()`で今回の質問に付ける → `run_turn()`がAPI応答から回答・利用量・時間を含むdictを返す、です。応答後にだけ今回の質問と回答を`history`へ追加します。`keep_recent_turns()`は指定した往復数に応じて、履歴listの末尾から完全なuser/assistantペアを選びます。
+
 今度は履歴を送らずに実行します。
 
 ```text
@@ -104,7 +131,7 @@ uv run python -m unittest discover -s tests -v
 
 ## 料金と権限
 
-この演習はBedrock Runtimeへの推論のみを行い、AWS resourceを作成しません。L03は1回の実行につき2回、L04も1回の実行につき2回呼び出します。L04で履歴あり・なしを比べる場合は2回実行するため、計4回です。各出力の上限は160 tokensです。料金はモデル、リージョン、各リクエストの入力token数と出力token数に応じて変わります。実行前に[Amazon Bedrock料金表](https://aws.amazon.com/bedrock/pricing/)で選択したモデルとリージョンの単価を確認し、表示された`input_tokens`と`output_tokens`を記録します。単価が1,000 tokensあたりの場合は、各実行の入力token数と出力token数をそれぞれ1,000で割って単価を掛け、種類ごとの金額を合計して概算します。料金表の課金単位が異なる場合はそちらに合わせます。実行を繰り返す分も課金対象になり得ます。
+この演習はBedrock Runtimeへの推論のみを行い、AWS resourceを作成しません。L03は1回の実行につき2回、L04も1回の実行につき2回呼び出します。L04で履歴あり・なしを比べる場合は2回実行するため、計4回です。各出力の上限は160 tokensです。料金はモデル、リージョン、各リクエストの入力token数と出力token数に応じて変わります。実行前に[Amazon Bedrock料金表](https://aws.amazon.com/bedrock/pricing/)で選択したモデルとリージョンの単価を確認し、L04の4応答を含め各API応答に表示された`input_tokens`と`output_tokens`を記録します。単価が1,000 tokensあたりの場合は、各API呼び出しの入力token数と出力token数をそれぞれ1,000で割り、対応する入力単価と出力単価を掛けた金額をすべて足して概算します。料金表の課金単位が異なる場合はそちらに合わせます。実行を繰り返す分も課金対象になり得ます。
 
 L04は固定の架空データと質問だけを送ります。コードを変更して任意入力を扱う場合でも、実データ、本番情報、機密情報、個人情報、credentialを入力しないでください。
 
