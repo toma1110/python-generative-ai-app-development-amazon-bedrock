@@ -4,7 +4,8 @@ from contextlib import redirect_stderr
 from io import StringIO
 from pathlib import Path
 
-from s07_app import EmptyInputError, InputTooLongError, read_text_file, summarize_text, validate_input
+from s07_app import EmptyInputError, IncompleteResponseError, InputTooLongError, read_text_file, summarize_text, validate_input
+from s07_l02 import main as l02_main
 from s07_l04 import main as l04_main
 
 
@@ -12,6 +13,7 @@ class FakeClient:
     def __init__(self, response=None):
         self.calls = []
         self.response = response or {
+            "stopReason": "end_turn",
             "output": {"message": {"content": [{"text": "確認できた事実の要約です。"}]}}
         }
 
@@ -71,14 +73,38 @@ class FileInputTests(unittest.TestCase):
     def test_summary_uses_file_text_and_a_bounded_converse_request(self):
         client = FakeClient()
 
-        result = summarize_text(client, "  原文の内容  ")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "memo.txt"
+            path.write_text("  原文の内容  ", encoding="utf-8")
+            source = read_text_file(path)
+        result = summarize_text(client, source)
 
         self.assertEqual(result, "確認できた事実の要約です。")
         self.assertEqual(len(client.calls), 1)
         request = client.calls[0]
         self.assertEqual(request["modelId"], "amazon.nova-lite-v1:0")
         self.assertEqual(request["inferenceConfig"]["maxTokens"], 256)
-        self.assertIn("原文の内容", request["messages"][0]["content"][0]["text"])
+        self.assertEqual(request["messages"][0]["content"][0]["text"], "次の調査メモを要約してください。\n\n原文の内容")
+
+    def test_max_tokens_response_is_not_returned_as_a_complete_summary(self):
+        client = FakeClient({
+            "stopReason": "max_tokens",
+            "output": {"message": {"content": [{"text": "途中までの出力"}]}},
+        })
+
+        with self.assertRaisesRegex(IncompleteResponseError, "出力上限で途中終了"):
+            summarize_text(client, "原文の内容")
+
+        self.assertEqual(len(client.calls), 1)
+
+    def test_response_without_text_is_distinguished_from_completed_summary(self):
+        client = FakeClient({
+            "stopReason": "end_turn",
+            "output": {"message": {"content": [{"image": {"format": "png", "source": {}}}]}},
+        })
+
+        with self.assertRaisesRegex(ValueError, "応答に要約テキストがありません"):
+            summarize_text(client, "原文の内容")
 
     def test_empty_input_does_not_call_the_model(self):
         client = FakeClient()
@@ -94,6 +120,19 @@ class FileInputTests(unittest.TestCase):
             path = Path(directory) / "memo.txt"
             path.write_text("ローカルだけで確認", encoding="utf-8")
             self.assertIn("ローカル", read_text_file(path))
+
+    def test_missing_file_stops_before_bedrock_client_is_created(self):
+        with tempfile.TemporaryDirectory() as directory:
+            missing = Path(directory) / "missing.txt"
+            error_output = StringIO()
+            from unittest.mock import patch
+
+            with patch("s07_l02.create_client") as create_client, redirect_stderr(error_output):
+                result = l02_main(["--file", str(missing)])
+
+        self.assertEqual(result, 2)
+        self.assertIn("ファイルが見つかりません", error_output.getvalue())
+        create_client.assert_not_called()
 
 
 if __name__ == "__main__":

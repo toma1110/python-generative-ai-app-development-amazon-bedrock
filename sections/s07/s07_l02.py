@@ -5,7 +5,7 @@ import sys
 
 from botocore.exceptions import BotoCoreError, ClientError
 
-from s07_app import configured_model_id, create_client, read_text_file, summarize_text
+from s07_app import IncompleteResponseError, configured_model_id, create_client, read_text_file, summarize_text
 
 
 def main(argv=None):
@@ -40,6 +40,12 @@ def main(argv=None):
         return 1
     except BotoCoreError:
         print("AWSへ接続できません。プロファイル、ログイン状態、リージョンを確認してください。", file=sys.stderr)
+        return 1
+    except IncompleteResponseError as error:
+        print(str(error), file=sys.stderr)
+        return 1
+    except ValueError as error:
+        print(str(error), file=sys.stderr)
         return 1
 
     print("要約（原文と照合して利用してください）:")

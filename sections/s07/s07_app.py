@@ -21,6 +21,10 @@ class InputTooLongError(ValueError):
     """Raised when a text file exceeds the exercise's input-size guard."""
 
 
+class IncompleteResponseError(ValueError):
+    """Raised when Converse returned without completing a normal answer."""
+
+
 def validate_input(text):
     """Return trimmed input text or raise a clear error for blank content."""
     if not isinstance(text, str) or not text.strip():
@@ -38,7 +42,7 @@ def read_text_file(path):
 
 
 def summarize_text(client, text, model_id=DEFAULT_MODEL_ID):
-    """Send one local text file to Converse and return its first text block."""
+    """Send one local text file to Converse and return a completed text answer."""
     source = validate_input(text)
     response = client.converse(
         modelId=model_id,
@@ -46,6 +50,15 @@ def summarize_text(client, text, model_id=DEFAULT_MODEL_ID):
         messages=[{"role": "user", "content": [{"text": f"次の調査メモを要約してください。\n\n{source}"}]}],
         inferenceConfig={"maxTokens": MAX_OUTPUT_TOKENS},
     )
+    stop_reason = response.get("stopReason")
+    if stop_reason != "end_turn":
+        if stop_reason == "max_tokens":
+            raise IncompleteResponseError(
+                "応答が出力上限で途中終了しました。表示された内容を完成した要約として扱わず、原文を確認してください。"
+            )
+        raise IncompleteResponseError(
+            f"応答が通常完了していません（stopReason: {stop_reason or '不明'}）。要約として扱わず、原文を確認してください。"
+        )
     for block in response["output"]["message"]["content"]:
         if "text" in block:
             return block["text"]
