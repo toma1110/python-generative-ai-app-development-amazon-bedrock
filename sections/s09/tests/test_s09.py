@@ -1,5 +1,9 @@
 import unittest
+import os
+import subprocess
+import sys
 from io import BytesIO
+from pathlib import Path
 from unittest.mock import Mock
 from botocore.exceptions import ClientError
 
@@ -19,6 +23,22 @@ def response(text="応答"):
 
 
 class Section09Tests(unittest.TestCase):
+    def test_cli_help_uses_utf8_even_when_parent_encoding_is_cp1252(self):
+        section_dir = Path(__file__).resolve().parents[1]
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "cp1252"
+        for script in ("s09_app.py", "s09_l02.py", "s09_l03.py", "s09_l06.py"):
+            with self.subTest(script=script):
+                result = subprocess.run(
+                    [sys.executable, str(section_dir / script), "--help"],
+                    cwd=section_dir.parents[1],
+                    env=env,
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr.decode("utf-8", errors="replace"))
+                self.assertIn("usage:", result.stdout.decode("utf-8"))
+
     def test_setup_creates_only_requested_bucket_and_fixed_object(self):
         s3 = Mock()
         s3.head_bucket.side_effect = ClientError(

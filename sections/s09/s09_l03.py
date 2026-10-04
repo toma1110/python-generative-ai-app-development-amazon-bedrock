@@ -18,11 +18,11 @@ def main(argv=None):
 
     from s09_common import configure_console, create_s3_client
 
+    configure_console()
     parser = argparse.ArgumentParser(description="指定したS3オブジェクトをUTF-8で読み取ります。")
     parser.add_argument("--bucket", required=True)
     parser.add_argument("--key", default="training/s09/incident-note.txt")
     args = parser.parse_args(argv)
-    configure_console()
     try:
         print(read_s3_text(create_s3_client(), args.bucket, args.key))
     except (BotoCoreError, ClientError, UnicodeDecodeError, ValueError) as error:

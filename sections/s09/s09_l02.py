@@ -32,11 +32,11 @@ def prepare_bucket(client, bucket, region, note_bytes):
 
 
 def main(argv=None):
+    configure_console()
     parser = argparse.ArgumentParser(description="架空の調査メモを新しいS3バケットへ配置します。")
     parser.add_argument("--bucket", required=True, help="自分で用意した一意な演習用バケット名")
     parser.add_argument("--region", required=True, help="作成するAWS Region")
     args = parser.parse_args(argv)
-    configure_console()
     try:
         key = prepare_bucket(create_s3_client(args.region), args.bucket, args.region, SAMPLE_PATH.read_bytes())
     except ValueError as error:

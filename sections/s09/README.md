@@ -2,6 +2,23 @@
 
 この演習では、架空の障害調査メモをS3に置き、boto3で読み取ってAmazon BedrockのConverse APIへ渡します。最後に、ローカルファイルとS3を同じアプリで切り替え、同じ原文に対するプロンプト変更前後の応答を人が照合します。モデルの応答だけで原因や対応を決めないでください。
 
+## これまでのPython・AWS学習を完成アプリで使う場所
+
+| 学んだこと | Section 9で確認する場所 | 役割 |
+| --- | --- | --- |
+| S03: 変数、条件分岐、関数、例外 | `s09_app.py` の `args`、`load_note`、`main` と `try` / `except` | 選択値から入力関数を決め、失敗を表示して終了する |
+| S03: list と dict | `s09_common.py` の `messages` / `content` と戻り値、`s09_app.py` の `result` | APIへ渡すメッセージと本文・利用量・応答時間をまとめて扱う |
+| S04: AWS profile と認証 | `s09_common.py` の `boto3.Session()` | コードへ鍵を書かず、設定済みprofileでS3 / Bedrock clientを作る |
+| S05: Converse API | `s09_common.py` の `ask_model` | メモと依頼を送り、応答本文と利用量を返す |
+| S06: CLIと会話アプリ | `s09_app.py` の `argparse` と `main` | `--source` / `--task` を受け取って一回の処理を実行する。このアプリは会話履歴を保持しない |
+| S07: ローカルファイル入力 | `s09_common.py` の `read_local_text` | ローカル入力を文字列にし、S3入力と同じ後続処理へ渡す |
+| S08: 同じ入力で変更を比べる | `s09_l06.py` の `compare` と表示されるtoken数・応答時間 | 同じメモへのprompt変更前後を人が原文と照合する |
+| S09: S3入力の追加 | `s09_app.py` の `load_note` と `s09_l03.py` の `read_s3_text` | S3の本文も文字列にして、ローカル入力と共通の処理へ渡す |
+
+`argparse` がコマンドラインを `args` に入れます。`args.source`、`args.path`、`args.bucket`、`args.key` が `load_note(args.source, args.path, args.bucket, args.key)` に渡り、関数がローカルまたはS3から読んだ本文を文字列で返します。`main` はその戻り値を `note` に入れ、`ask_model(create_bedrock_client(), note, args.task, args.question)` に渡します。戻り値は `text`、`input_tokens`、`output_tokens`、`latency_ms` を持つdictで、`main` が `result` に受けて `print` します。
+
+`args.source` が `local` なら `args.path` を `read_local_text` へ、`s3` なら `args.bucket` と `args.key` を `read_s3_text` へ渡します。読み込みに失敗すればBedrockのAPI呼び出し前に終了します。読み込み後にConverseが失敗した場合は、`ask_model` 内のBedrock呼び出しでエラーになります。`args.task` の `summary` / `checks` / `ask` は依頼内容を選び、`ask` では `args.question` も必要です。
+
 ## 準備
 
 - Python 3.11以上、[uv](https://docs.astral.sh/uv/)、AWS CLIを使えるローカル環境を用意します。

@@ -22,13 +22,13 @@ def compare(client, note_text):
 
 
 def main(argv=None):
+    configure_console()
     parser = argparse.ArgumentParser(description="同じ教材メモを2種類の指示で処理し、結果を比べます。")
     parser.add_argument("--source", choices=("local", "s3"), default="local")
     parser.add_argument("--path", type=Path, default=SAMPLE_PATH)
     parser.add_argument("--bucket")
     parser.add_argument("--key", default="training/s09/incident-note.txt")
     args = parser.parse_args(argv)
-    configure_console()
     try:
         note = load_note(args.source, args.path, args.bucket, args.key)
         results = compare(create_bedrock_client(), note)

@@ -21,6 +21,7 @@ def load_note(source, path, bucket, key):
 
 
 def main(argv=None):
+    configure_console()
     parser = argparse.ArgumentParser(description="架空の調査メモを読み、要約・確認項目・追加質問を実行します。")
     parser.add_argument("--source", choices=("local", "s3"), default="local")
     parser.add_argument("--path", type=Path, default=SAMPLE_PATH)
@@ -29,7 +30,6 @@ def main(argv=None):
     parser.add_argument("--task", choices=("summary", "checks", "ask"), default="summary")
     parser.add_argument("--question", help="--task askで使う追加質問")
     args = parser.parse_args(argv)
-    configure_console()
     try:
         note = load_note(args.source, args.path, args.bucket, args.key)
         result = ask_model(create_bedrock_client(), note, args.task, args.question)
