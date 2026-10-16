@@ -43,15 +43,25 @@ macOS / Linuxでは`python3 hello.py`を使います。`Hello, Python!`と、こ
 
 venvはVMやコンテナのようにOSを仮想化する仕組みではありません。プロジェクト用のPython実行環境と、そこから使うパッケージの置き場所を分けます。ベースPythonはvenvを作る元のPython、`.venv`内のPythonはプロジェクトから使うPython、pipは実行したPython環境へパッケージを入れる道具です。たとえば、アプリAが`requests` 2系、アプリBが別の版を必要としても、それぞれのvenvへ分ければ同じベースPythonを使いながら依存関係を混ぜずに済みます。
 
-L02で使ったターミナルを続けて使います。現在の場所は`l02`なので、リポジトリの最上位フォルダーへ戻ってから`l03`へ移動し、仮想環境を作ります。
+L02で使ったターミナルを続けて使います。現在の場所は`l02`なので、まずリポジトリの最上位フォルダーへ戻ります。
 
 ```powershell
 cd ../../..
+```
+
+次に、L03のフォルダーへ移動します。コマンドを実行した後、ターミナルの場所が`sections/s02/l03`になっていることを確認してください。
+
+```powershell
 cd sections/s02/l03
+```
+
+場所を確認したら、仮想環境を作成します。
+
+```powershell
 python -m venv .venv
 ```
 
-macOS / Linuxでは`python3 -m venv .venv`を使います。次に仮想環境を有効化します。
+macOS / Linuxでは`python3 -m venv .venv`を使います。作成中はpipを準備していても画面に何も表示されない場合があります。コマンドが終わってプロンプトに戻り、エラーが表示されていないことを確認してから、次の仮想環境有効化コマンドを実行してください。
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
