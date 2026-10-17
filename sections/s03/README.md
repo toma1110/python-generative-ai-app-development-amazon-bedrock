@@ -56,6 +56,8 @@ SREさん、API応答の確認を始めます。
 
 ## L03: list・dict・for・ifでデータを処理する
 
+コードを読む前に、記号と字下げを確認します。`=`は右側の値を左側の名前へ代入し、`==`は左右の値が等しいかを比べます。`for`や`if`の次の行は字下げされ、その処理の内側になります。字下げが戻ると、その`for`や`if`の外側です。
+
 ```text
 python sections/s03/l03/main.py
 ```
@@ -89,7 +91,7 @@ API応答: 確認済み
 
 - `KeyError`は、dictに存在しないkeyを書いたときに起きます。データの`"name"` / `"status"`と、`check[...]`の綴りをそろえます。
 - `IndentationError`は、forやifの下の行の字下げがそろわないときに起きます。コロンの次の行を同じ幅だけ字下げします。
-- Pythonでは`=`は代入、`==`は値の比較です。ifの条件を`=`にすると構文エラーになります。
+- Pythonでは`=`と`==`は役割が異なります。ifの条件には比較の`==`を書きます。
 
 ## L04: 関数とimportで処理を分ける
 
@@ -110,25 +112,29 @@ API応答: 確認済み
 1件ずつの流れは次のとおりです。
 
 ```text
-main()内: checks = get_checks()
-main()内: for check in checks:
-             show_check(check)
-                 └─ result = classify_check(check)
-                       └─ returnで分類文字列を返す
-                 └─ print(nameとresult) ─> 画面
+main()
+  └─ show_check(check)
+       └─ result = classify_check(check)
+            └─ return "確認済み" または "追加確認が必要"
+       └─ print(nameとresult) → 画面
 ```
 
-`return "追加確認が必要"`は呼び出し元へ分類文字列を返すので、`result`へ代入して後で使えます。`print(...)`は画面へ出すだけで、表示した文字列を返しません。`show_check`は表示、`classify_check`は分類を担当します。最後の`if __name__ == "__main__":`が`main()`を呼び、実行を開始します。抜粋の`for`と関数呼び出しはこの`main()`の中で動きます。
+`classify_check`の引数`check`をifが調べ、どちらか一方のreturnが文字列を呼び出し元へ返します。その値を`show_check`の`result`が受け取り、`print`が画面へ表示します。`show_check`は表示、`classify_check`は分類を担当します。`main()`の中では`checks = get_checks()`でlistを受け取り、forが1件ずつ`show_check`へ渡します。ファイル末尾の`if __name__ == "__main__":`が`main()`を呼び、実行を開始します。
+
+L03の「確認済み」はL04の`"ok"`、L03の「要確認」は`"needs_review"`に対応します。どちらもPythonの特別な命令ではなく、この演習で状態を表す文字列です。`classify_check`がその状態を読み、「確認済み」または「追加確認が必要」という表示用文字列に分類します。
 
 ### 1箇所だけ変える
 
 編集するファイルは`sections/s03/l04/main.py`です。`classify_check`内の`if check["status"] == "needs_review":`を`if check["status"] == "ok":`へ変え、`python sections/s03/l04/main.py`を実行します。出力は`API応答: 追加確認が必要`、`エラーログ: 確認済み`、`再試行回数: 追加確認が必要`となります。分類対象の比較値だけを変えた結果を確認したら、`"needs_review"`へ戻します。
 
+### 別の実験: returnをprintへ変える
+
+通常の実行と出力を確認した後、returnとprintの違いを試します。`classify_check`の最後にあるfallbackの`return "確認済み"`だけを`print("確認済み")`へ置き換え、同じコマンドを実行します。条件に合わないAPI応答と再試行回数では、まず`確認済み`が単独で表示され、その後`API応答: None`、`再試行回数: None`と表示されます。関数がreturnせずに終わると、Pythonは`None`を返すためです。一方、条件に合うエラーログは最初の`return "追加確認が必要"`で関数を終えるため、その表示は変わりません。確認後はfallbackを`return "確認済み"`に戻します。
+
 ### よくある失敗
 
 - 実行しても何も表示されないときは、関数を定義しただけで呼び出していない可能性があります。`main()`とその呼び出し条件を確認します。
 - `ModuleNotFoundError`は`check_data.py`を見つけられない状態です。2ファイルが同じ`l04`フォルダーにあるか、READMEのコマンドをrepository最上位から実行したか確認します。
-- `classify_check`の最後にあるfallbackの`return "確認済み"`だけを`print("確認済み")`へ置き換えて、`python sections/s03/l04/main.py`を実行してみます。条件に合わないAPI応答と再試行回数では、まず`確認済み`が単独で表示され、その後に`API応答: None`、`再試行回数: None`と表示されます。`print`は文字列を画面に出しますが戻り値は`None`なので、呼び出し元の`result`に分類文字列が入りません。一方、条件に合うエラーログは最初の`return "追加確認が必要"`で関数を終えるため、`エラーログ: 追加確認が必要`のままです。確認後はfallbackを`return "確認済み"`へ戻します。
 
 ## L05: ファイルとJSONを読み、例外を扱う
 
@@ -228,6 +234,20 @@ python sections/s03/l05/main.py sections/s03/l05/broken.json
 上のコマンドはrepository最上位から実行します。JSONの行番号を含む案内が表示されます。確認後、作成した`broken.json`を削除します。`cases.json`は演習用入力なので残してください。
 
 JSONとしては正しくても、必要な値の型や選択値が違う場合があります。たとえば`cases.json`の`status`を`"unknown"`にすると、`validate_checks`が`ValueError`を発生させます。`load_checks`がその例外を`except ValueError`で捕捉し、`(None, 利用者向けメッセージ)`を返します。`main`は受け取ったメッセージを`print`し、終了コード1を`return`します。実行入口の`SystemExit`がその終了コードをOSへ渡します。`validate_checks`の`return value`は検証済みlistを呼び出し元へ返す命令で、画面には表示しません。`print`は画面表示、`raise`は例外の発生、`except`は例外を捕捉する命令です。修正後は最初の正常実行と同じ出力に戻ることを確認します。
+
+`load_checks(path)`は二つの値を返します。正常なら検証済みのlistと`None`、失敗なら`None`と案内文字列です。`checks, error = load_checks(path)`は、その順に二つの名前へ受け取ります。
+
+```text
+正常: load_checks(path) → (checks, None)
+                         checks ← checks / error ← None
+                         error is not None は偽 → checksを表示 → return 0
+
+失敗: load_checks(path) → (None, error_message)
+                         checks ← None / error ← 案内文字列
+                         error is not None は真 → print(error) → return 1
+```
+
+ファイル名を指定する場合は`python sections/s03/l05/main.py sections/s03/l05/cases.json`のようにコマンドへpathを続けます。指定がない場合は`python sections/s03/l05/main.py`を実行し、`main.py`と同じフォルダーの`cases.json`が選ばれます。前者の相対pathはターミナルの現在地を基準にし、後者は実行中の`main.py`の場所を基準にします。
 
 ### よくある失敗
 
