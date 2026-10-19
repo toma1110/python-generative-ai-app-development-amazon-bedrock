@@ -43,17 +43,33 @@ aws s3api list-objects-v2 --bucket <bucket> --profile <profile> --region <region
 
 バケット削除は復元できず、削除した名前を別のAWS利用者が取得できるようになる可能性があります。アカウント、Region、バケット名をもう一度照合し、この演習のために自分で作ったバケットで、オブジェクト一覧が空であることを確認してから実行します。
 
-```sh
+次のコマンドで空のバケットを削除します。成功した場合、AWSが削除を受け付けたことを確認できます。失敗した場合は削除完了とせず、アカウント、Region、バケット名、権限を調べて停止してください。再実行で解決しようとしないでください。
+
+PowerShell:
+
+```powershell
 aws s3api delete-bucket --bucket <bucket> --profile <profile> --region <region>
+if ($LASTEXITCODE -ne 0) { throw "バケット削除を確認できません。終了コード: $LASTEXITCODE" }
 ```
 
-削除後に存在確認を行います。
+macOS / Linux:
+
+```sh
+if aws s3api delete-bucket --bucket <bucket> --profile <profile> --region <region>; then
+  echo "AWSがバケット削除を受け付けました"
+else
+  echo "バケット削除を確認できません。アカウント、Region、バケット名、権限を調べて停止してください" >&2
+  exit 1
+fi
+```
+
+`HeadBucket`は状況を調べるために実行できますが、削除完了の判定には使いません。
 
 ```sh
 aws s3api head-bucket --bucket <bucket> --profile <profile> --region <region>
 ```
 
-バケットが存在しないことを示す応答（通常は`404`）なら削除を確認できます。別のエラーは削除確認として扱わず、アカウント、Region、権限を調べます。削除の伝播に時間がかかる場合があります。再実行で解決しようとせず、状態を確認してください。
+`HeadBucket`の`400`、`403`、`404`はいずれも、バケットが存在しないこととアクセス上の問題を区別できない場合があります。どの応答も削除の成否を単独では証明しません。`DeleteBucket`が成功していない場合は削除完了とせず、アカウント、Region、バケット名、権限を調べてください。結果が食い違う場合も削除を繰り返さず、状態を確認してください。
 
 ## 必要な権限と料金
 
