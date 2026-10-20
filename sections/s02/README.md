@@ -35,9 +35,9 @@ python hello.py
 
 macOS / Linuxでは`python3 hello.py`を使います。`Hello, Python!`と、この実行に使われたPythonの場所が表示されます。
 
-次にVS Codeで`l02`フォルダーを開き、`hello.py`を表示します。VS Code本体はエディターで、Python拡張機能がPythonの選択と実行を補助します。コマンドパレットから`Python: Select Interpreter`を選び、CLIの実行で表示されたPythonを選択してください。ファイル右上の実行ボタンから実行し、同じ挨拶と同じPythonの場所が表示されるか比べます。
+次にVS Codeで`l02`フォルダーを開き、`hello.py`を表示します。コマンドパレットから`Python: Select Interpreter`を選び、CLIの実行で表示されたPythonを選択してください。`Run and Debug`ビューで`Python: hello.py (internal console)`を選び、F5で実行します。結果は`Debug Console`に表示されるため、CLIと同じ挨拶と`Python executable`の場所を比べます。この設定は`sections/s02/l02/.vscode/launch.json`にあり、Pythonの絶対パスを固定せず、VS Codeで選択したインタープリターを使います。
 
-場所が異なる場合は、VS Codeで選択中のインタープリターをもう一度確認します。ファイルが同じでも、CLIとVS Codeで別のPythonを使うと、片方へ導入したライブラリをもう片方が見つけられないことがあります。L03でこの違いを確かめます。
+場所が異なる場合は、VS Codeでインタープリターを選び直し、F5で再実行してから、`Debug Console`に表示された挨拶と`Python executable`の場所をもう一度比べます。ファイルが同じでも、CLIとVS Codeで別のPythonを使うと、片方へ導入したライブラリをもう片方が見つけられないことがあります。L03でこの違いを確かめます。
 
 ## L03: 仮想環境（venv）とpipでライブラリを分ける
 
