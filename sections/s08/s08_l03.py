@@ -8,6 +8,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 
 from s08_common import (
     MAX_OUTPUT_TOKENS,
+    IncompleteResponseError,
     configure_console,
     converse,
     create_client,
@@ -30,14 +31,19 @@ def build_user_text(case_text, prompt):
 
 
 def compare(client, case_text):
-    results = []
     # Hold the case text and shared request settings constant; compare only the user prompt.
     for label, prompt in (("変更前", BASELINE_PROMPT), ("変更後", REVISED_PROMPT)):
         # The prompt and same source note become one user message for this API call.
         response = converse(client, [message("user", build_user_text(case_text, prompt))], SYSTEM)
         # Text, token usage, and Bedrock latency all come from this response.
-        results.append({"label": label, "text": response_text(response), **response_metrics(response)})
-    return results
+        yield {"label": label, "text": response_text(response), **response_metrics(response)}
+
+
+def display_result(result):
+    print(f"\n## {result['label']}のプロンプト")
+    print(result["text"])
+    print("利用量: 入力 {input_tokens} / 出力 {output_tokens} / 合計 {total_tokens} tokens".format(**result))
+    print(f"Bedrock応答時間: {result['latency_ms']} ms")
 
 
 def main():
@@ -45,6 +51,11 @@ def main():
     try:
         case_text = SAMPLE_PATH.read_text(encoding="utf-8")
         results = compare(create_client(), case_text)
+        for result in results:
+            display_result(result)
+    except IncompleteResponseError as error:
+        print(str(error), file=sys.stderr)
+        return 1
     except ClientError as error:
         details = error.response.get("Error", {})
         metadata = error.response.get("ResponseMetadata", {})
@@ -57,11 +68,6 @@ def main():
         print("AWS接続または教材データを確認できません。プロファイル、リージョン、sample fileを確認してください。", file=sys.stderr)
         return 1
 
-    for result in results:
-        print(f"\n## {result['label']}のプロンプト")
-        print(result["text"])
-        print("利用量: 入力 {input_tokens} / 出力 {output_tokens} / 合計 {total_tokens} tokens".format(**result))
-        print(f"Bedrock応答時間: {result['latency_ms']} ms")
     print("\n出力を原文と照合し、採用・修正・保留のいずれかと理由を自分で記録してください。")
     return 0
 

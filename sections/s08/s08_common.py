@@ -4,13 +4,29 @@ import os
 import sys
 
 import boto3
+from botocore.config import Config
 
 DEFAULT_MODEL_ID = "amazon.nova-lite-v1:0"
-MAX_OUTPUT_TOKENS = 160
+MAX_OUTPUT_TOKENS = 512
+
+
+class IncompleteResponseError(RuntimeError):
+    """Raised when Bedrock did not report a completed assistant turn."""
+
+    def __init__(self, stop_reason):
+        self.stop_reason = stop_reason or "不明"
+        super().__init__(
+            f"応答は完了していません（stopReason: {self.stop_reason}）。"
+            "この応答を比較や会話履歴に使わず、自動再送もせずに停止します。"
+        )
 
 
 def create_client():
-    return boto3.Session().client("bedrock-runtime")
+    # A lost response must not cause the SDK to send another billable inference request.
+    return boto3.Session().client(
+        "bedrock-runtime",
+        config=Config(retries={"mode": "standard", "total_max_attempts": 1}),
+    )
 
 
 def configure_console():
@@ -29,6 +45,9 @@ def message(role, text):
 
 
 def response_text(response):
+    stop_reason = response.get("stopReason")
+    if stop_reason != "end_turn":
+        raise IncompleteResponseError(stop_reason)
     for block in response["output"]["message"]["content"]:
         if "text" in block:
             return block["text"]

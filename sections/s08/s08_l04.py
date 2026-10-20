@@ -11,6 +11,7 @@ from s08_common import (
     configure_console,
     converse,
     create_client,
+    IncompleteResponseError,
     keep_recent_turns,
     message,
     response_metrics,
@@ -73,6 +74,9 @@ def main(argv=None):
         print(f"\n質問{turn_number}: {question}")
         try:
             result = run_turn(client, history, user_text, args.history_turns)
+        except IncompleteResponseError as error:
+            print(str(error), file=sys.stderr)
+            return 1
         except ClientError as error:
             details = error.response.get("Error", {})
             metadata = error.response.get("ResponseMetadata", {})
