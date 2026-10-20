@@ -63,6 +63,15 @@ else
 fi
 ```
 
+削除成功後、同じprofileのアカウントが作成時と一致していることを再確認し、アカウント全体のバケット一覧を更新して対象名がないことを確認します。
+
+```sh
+aws sts get-caller-identity --profile <profile>
+aws s3api list-buckets --profile <profile> --query "Buckets[?Name=='<bucket>'].Name" --output json
+```
+
+アカウントIDが一致し、一覧結果が`[]`なら、このアカウントの一覧に対象名がないことを確認できます。対象名が表示される、一覧を取得できない、またはアカウントIDを照合できない場合は削除完了と扱わず、`DeleteBucket`を繰り返さずに管理者へ相談してください。`ListBuckets`はアカウント全体を返すため、Regionで絞り込む操作ではありません。
+
 `HeadBucket`は状況を調べるために実行できますが、削除完了の判定には使いません。
 
 ```sh
@@ -73,7 +82,7 @@ aws s3api head-bucket --bucket <bucket> --profile <profile> --region <region>
 
 ## 必要な権限と料金
 
-この手順では対象バケットの`s3:GetBucketLocation`、`s3:GetBucketVersioning`、`s3:ListBucket`、`s3:DeleteObject`、空になったバケットの`s3:DeleteBucket`が必要です。必要権限がない場合は、バケット名・Region・必要なactionを管理者へ伝えて相談してください。権限を自分で追加しないでください。
+この手順では対象バケットの`s3:GetBucketLocation`、`s3:GetBucketVersioning`、`s3:ListBucket`、`s3:DeleteObject`、空になったバケットの`s3:DeleteBucket`、削除後の一覧確認に`s3:ListAllMyBuckets`が必要です。必要権限がない場合は、バケット名・Region・必要なactionを管理者へ伝えて相談してください。権限を自分で追加しないでください。
 
 S3の保管、リクエスト、転送には料金が発生する場合があります。演習後に残ったresourceがないか、AWSコンソールでも対象アカウントとRegionを選んで確認してください。Bedrockの推論料金は呼び出しごとに発生し得ますが、削除するresourceはありません。
 
