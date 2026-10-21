@@ -32,12 +32,34 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         note = load_note(args.source, args.path, args.bucket, args.key)
-        result = ask_model(create_bedrock_client(), note, args.task, args.question)
+    except UnicodeDecodeError:
+        if args.source == "s3":
+            details = "指定したS3 objectがUTF-8のテキストか確認してください。"
+        else:
+            details = "--pathで指定した入力ファイルがUTF-8のテキストか確認してください。"
+        print(f"入力の読み込みに失敗しました (UnicodeDecodeError)。{details}", file=sys.stderr)
+        return 1
     except ValueError as error:
         print(error, file=sys.stderr)
         return 1
     except (BotoCoreError, ClientError, OSError, UnicodeDecodeError) as error:
-        print(f"AWS接続または入力の読み込みに失敗しました ({type(error).__name__})。認証、Region、対象オブジェクト、権限を確認してください。", file=sys.stderr)
+        if args.source == "s3":
+            details = "AWS_PROFILEの認証、アカウント、Region、bucket/key、s3:GetObject権限を確認してください。"
+        else:
+            details = "--pathと、入力ファイルがUTF-8のテキストであることを確認してください。"
+        print(f"入力の読み込みに失敗しました ({type(error).__name__})。{details}", file=sys.stderr)
+        return 1
+
+    try:
+        result = ask_model(create_bedrock_client(), note, args.task, args.question)
+    except ValueError as error:
+        print(error, file=sys.stderr)
+        return 1
+    except (BotoCoreError, ClientError) as error:
+        print(
+            f"Bedrock推論に失敗しました ({type(error).__name__})。AWS_PROFILEの認証、BEDROCK_MODEL_ID、利用可能なRegion、bedrock:InvokeModel権限とquotaを確認してください。",
+            file=sys.stderr,
+        )
         return 1
 
     print("## モデルの応答（原文と照合してください）")

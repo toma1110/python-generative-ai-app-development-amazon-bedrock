@@ -2,12 +2,12 @@ import unittest
 import os
 import subprocess
 import sys
-from io import BytesIO
+from io import BytesIO, StringIO
 from pathlib import Path
-from unittest.mock import Mock
-from botocore.exceptions import ClientError
+from unittest.mock import Mock, patch
+from botocore.exceptions import BotoCoreError, ClientError
 
-from s09_app import load_note
+from s09_app import load_note, main
 from s09_common import ask_model, response_metrics
 from s09_l02 import OBJECT_KEY, prepare_bucket
 from s09_l03 import read_s3_text
@@ -76,6 +76,72 @@ class Section09Tests(unittest.TestCase):
             path = Path(directory) / "memo.txt"
             path.write_text("local memo", encoding="utf-8")
             self.assertEqual(load_note("local", path, None, OBJECT_KEY), "local memo")
+
+    def test_s3_read_failure_reports_input_help_and_skips_bedrock(self):
+        error = ClientError(
+            {"Error": {"Code": "AccessDenied", "Message": "private detail"}}, "GetObject"
+        )
+        stderr = StringIO()
+        with (
+            patch("s09_app.load_note", side_effect=error),
+            patch("s09_app.create_bedrock_client") as create_client,
+            patch("s09_app.ask_model") as invoke_model,
+            patch("s09_app.sys.stderr", stderr),
+        ):
+            self.assertEqual(main(["--source", "s3", "--bucket", "demo-bucket"]), 1)
+        self.assertIn("入力の読み込みに失敗しました (ClientError)", stderr.getvalue())
+        self.assertIn("bucket/key、s3:GetObject権限", stderr.getvalue())
+        self.assertNotIn("private detail", stderr.getvalue())
+        create_client.assert_not_called()
+        invoke_model.assert_not_called()
+
+    def test_invalid_utf8_input_does_not_print_decode_exception_details(self):
+        error = UnicodeDecodeError("utf-8", b"private bytes", 0, 1, "invalid start byte")
+        stderr = StringIO()
+        with (
+            patch("s09_app.load_note", side_effect=error),
+            patch("s09_app.create_bedrock_client") as create_client,
+            patch("s09_app.ask_model") as invoke_model,
+            patch("s09_app.sys.stderr", stderr),
+        ):
+            self.assertEqual(main(["--source", "s3", "--bucket", "demo-bucket"]), 1)
+        self.assertIn("入力の読み込みに失敗しました (UnicodeDecodeError)", stderr.getvalue())
+        self.assertIn("UTF-8のテキスト", stderr.getvalue())
+        self.assertNotIn("private bytes", stderr.getvalue())
+        create_client.assert_not_called()
+        invoke_model.assert_not_called()
+
+    def test_bedrock_client_creation_failure_reports_inference_help(self):
+        stderr = StringIO()
+        with (
+            patch("s09_app.load_note", return_value="memo"),
+            patch("s09_app.create_bedrock_client", side_effect=BotoCoreError(error_msg="private detail")),
+            patch("s09_app.ask_model") as invoke_model,
+            patch("s09_app.sys.stderr", stderr),
+        ):
+            self.assertEqual(main(["--source", "local"]), 1)
+        self.assertIn("Bedrock推論に失敗しました (BotoCoreError)", stderr.getvalue())
+        self.assertIn("BEDROCK_MODEL_ID", stderr.getvalue())
+        self.assertIn("bedrock:InvokeModel", stderr.getvalue())
+        self.assertNotIn("private detail", stderr.getvalue())
+        invoke_model.assert_not_called()
+
+    def test_converse_failure_reports_inference_help_without_response_body(self):
+        error = ClientError(
+            {"Error": {"Code": "AccessDeniedException", "Message": "private response body"}}, "Converse"
+        )
+        stderr = StringIO()
+        with (
+            patch("s09_app.load_note", return_value="memo"),
+            patch("s09_app.create_bedrock_client", return_value=Mock()),
+            patch("s09_app.ask_model", side_effect=error),
+            patch("s09_app.sys.stderr", stderr),
+        ):
+            self.assertEqual(main(["--source", "local"]), 1)
+        self.assertIn("Bedrock推論に失敗しました (ClientError)", stderr.getvalue())
+        self.assertIn("BEDROCK_MODEL_ID", stderr.getvalue())
+        self.assertNotIn("private response body", stderr.getvalue())
+        self.assertNotIn("入力の読み込みに失敗", stderr.getvalue())
 
     def test_model_request_reports_text_usage_and_safe_system_instruction(self):
         client = Mock()

@@ -17,7 +17,7 @@
 
 `argparse` がコマンドラインを `args` に入れます。`args.source`、`args.path`、`args.bucket`、`args.key` が `load_note(args.source, args.path, args.bucket, args.key)` に渡り、関数がローカルまたはS3から読んだ本文を文字列で返します。`main` はその戻り値を `note` に入れ、`ask_model(create_bedrock_client(), note, args.task, args.question)` に渡します。戻り値は `text`、`input_tokens`、`output_tokens`、`latency_ms` を持つdictで、`main` が `result` に受けて `print` します。
 
-`args.source` が `local` なら `args.path` を `read_local_text` へ、`s3` なら `args.bucket` と `args.key` を `read_s3_text` へ渡します。読み込みに失敗すればBedrockのAPI呼び出し前に終了します。読み込み後にConverseが失敗した場合は、`ask_model` 内のBedrock呼び出しでエラーになります。`args.task` の `summary` / `checks` / `ask` は依頼内容を選び、`ask` では `args.question` も必要です。
+`args.source` が `local` なら `args.path` を `read_local_text` へ、`s3` なら `args.bucket` と `args.key` を `read_s3_text` へ渡します。読み込みに失敗すればBedrockのAPI呼び出し前に終了し、入力元に応じた確認先を表示します。読み込み後にConverseが失敗した場合は別の案内を表示し、AWS profileの認証、model ID、Region、`bedrock:InvokeModel`権限とquotaを確認します。どちらのエラー表示にもAWSの応答本文やcredentialは含めません。`args.task` の `summary` / `checks` / `ask` は依頼内容を選び、`ask` では `args.question` も必要です。
 
 ## 準備
 
@@ -134,6 +134,8 @@ uv run --directory sections/s09 python -m unittest discover -s tests -v
 ## 想定と異なる場合
 
 - `AccessDenied`や`403`: `AWS_PROFILE`、表示されたアカウント、Region、対象bucket/keyと上記actionを確認します。S3に`ListBucket`権限がない場合、存在しないkeyでも404でなく403になる場合があります。
+- 入力読み込みエラー: S3入力なら`AWS_PROFILE`の認証、アカウント、Region、bucket/key、`s3:GetObject`権限を確認します。ローカル入力なら`--path`と、入力fileがUTF-8のテキストであることを確認します。この段階で失敗するとBedrockは呼び出されません。
+- Bedrock推論エラー: 入力の読み込み後に発生します。`AWS_PROFILE`の認証、`BEDROCK_MODEL_ID`、利用可能なRegion、`bedrock:InvokeModel`権限とquotaを確認します。エラー表示にモデルの応答本文やcredentialは含まれません。
 - bucket作成時の名前エラー: 別の新しい名前を選びます。既存bucketが見つかったときは上書きしません。
 - Regionエラー: `AWS_DEFAULT_REGION`とs09-l02の`--region`を同じ値にし、作成後は同じRegionを使います。
 - `NoSuchKey`: 表示されたbucketと固定keyを照合します。object名の大文字小文字も一致させます。
