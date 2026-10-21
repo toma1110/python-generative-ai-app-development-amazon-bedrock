@@ -8,17 +8,18 @@ from unittest.mock import Mock, patch
 from botocore.exceptions import BotoCoreError, ClientError
 
 from s09_app import load_note, main
-from s09_common import ask_model, response_metrics
+from s09_common import IncompleteResponseError, ask_model, create_bedrock_client, response_metrics
 from s09_l02 import OBJECT_KEY, prepare_bucket
 from s09_l03 import read_s3_text
-from s09_l06 import BASELINE_PROMPT, REVISED_PROMPT, compare
+from s09_l06 import BASELINE_PROMPT, REVISED_PROMPT, compare, main as s09_l06_main
 
 
-def response(text="応答"):
+def response(text="応答", stop_reason="end_turn"):
     return {
         "output": {"message": {"content": [{"text": text}]}},
         "usage": {"inputTokens": 11, "outputTokens": 7},
         "metrics": {"latencyMs": 100},
+        "stopReason": stop_reason,
     }
 
 
@@ -143,19 +144,50 @@ class Section09Tests(unittest.TestCase):
         self.assertNotIn("private response body", stderr.getvalue())
         self.assertNotIn("入力の読み込みに失敗", stderr.getvalue())
 
+    def test_incomplete_model_response_is_reported_without_traceback(self):
+        stderr = StringIO()
+        with (
+            patch("s09_app.load_note", return_value="memo"),
+            patch("s09_app.create_bedrock_client", return_value=Mock()),
+            patch("s09_app.ask_model", side_effect=IncompleteResponseError("max_tokens")),
+            patch("s09_app.sys.stderr", stderr),
+        ):
+            self.assertEqual(main(["--source", "local"]), 1)
+        self.assertIn("stopReason: max_tokens", stderr.getvalue())
+        self.assertIn("自動再送もしない", stderr.getvalue())
+        self.assertNotIn("Traceback", stderr.getvalue())
+
     def test_model_request_reports_text_usage_and_safe_system_instruction(self):
         client = Mock()
         client.converse.return_value = response("要約")
         result = ask_model(client, "架空メモ", "summary")
         request = client.converse.call_args.kwargs
-        self.assertEqual(result, {"text": "要約", "input_tokens": 11, "output_tokens": 7, "latency_ms": 100})
+        self.assertEqual(result, {
+            "text": "要約", "input_tokens": 11, "output_tokens": 7,
+            "latency_ms": 100, "stop_reason": "end_turn",
+        })
+        self.assertEqual(request["inferenceConfig"]["maxTokens"], 512)
         self.assertIn("断定しません", request["system"][0]["text"])
         self.assertIn("架空メモ", request["messages"][0]["content"][0]["text"])
+
+    def test_bedrock_client_disables_sdk_retries(self):
+        session = Mock()
+        with patch("s09_common.boto3.Session", return_value=session):
+            create_bedrock_client()
+        config = session.client.call_args.kwargs["config"]
+        self.assertEqual(config.retries["total_max_attempts"], 1)
+
+    def test_incomplete_response_is_rejected_without_retry(self):
+        client = Mock()
+        client.converse.return_value = response("途中の文", stop_reason="max_tokens")
+        with self.assertRaisesRegex(IncompleteResponseError, "max_tokens"):
+            ask_model(client, "架空メモ", "summary")
+        client.converse.assert_called_once()
 
     def test_comparison_uses_identical_note_with_two_different_prompts(self):
         client = Mock()
         client.converse.side_effect = [response("前"), response("後")]
-        results = compare(client, "same note")
+        results = list(compare(client, "same note"))
         self.assertNotEqual(BASELINE_PROMPT, REVISED_PROMPT)
         self.assertEqual(client.converse.call_count, 2)
         self.assertEqual(
@@ -169,7 +201,41 @@ class Section09Tests(unittest.TestCase):
         )
 
     def test_missing_metrics_are_reported_as_unknown(self):
-        self.assertEqual(response_metrics({}), {"input_tokens": "不明", "output_tokens": "不明", "latency_ms": "不明"})
+        self.assertEqual(response_metrics({}), {
+            "input_tokens": "不明", "output_tokens": "不明",
+            "latency_ms": "不明", "stop_reason": "不明",
+        })
+
+    def test_first_complete_result_is_printed_and_kept_if_second_call_is_incomplete(self):
+        output = StringIO()
+        error_output = StringIO()
+        client = Mock()
+        call_count = 0
+
+        def ask_once(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 2:
+                self.assertIn("## BASELINE（既存の短い要約指示）", output.getvalue())
+                self.assertIn("最初の回答", output.getvalue())
+                raise IncompleteResponseError("max_tokens")
+            return {
+                "text": "最初の回答",
+                "input_tokens": 11, "output_tokens": 7,
+                "latency_ms": 100, "stop_reason": "end_turn",
+            }
+
+        with (
+            patch("s09_l06.load_note", return_value="same note"),
+            patch("s09_l06.create_bedrock_client", return_value=client),
+            patch("s09_l06.ask_model", side_effect=ask_once),
+            patch("s09_l06.sys.stdout", output),
+            patch("s09_l06.sys.stderr", error_output),
+        ):
+            self.assertEqual(s09_l06_main(["--source", "local"]), 1)
+        self.assertEqual(call_count, 2)
+        self.assertIn("最初の回答", output.getvalue())
+        self.assertIn("stopReason: max_tokens", error_output.getvalue())
 
 
 if __name__ == "__main__":

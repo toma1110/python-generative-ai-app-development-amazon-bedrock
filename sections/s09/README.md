@@ -94,15 +94,25 @@ uv run --project sections/s09 python sections/s09/s09_app.py --source s3 --bucke
 
 ## 同じ原文で変更前後を比べる（s09-l06）
 
-まず編集前の`REVISED`結果を記録します。次のcommandは同じローカルメモに、元から異なる`BASELINE`と`REVISED`の2つのプロンプトを適用します。この初回の2結果は、コード編集前後の組ではありません。
+まず編集前の`REVISED`結果を記録します。次のcommandは同じローカルメモに、元から異なる`BASELINE`と`REVISED`の2つのプロンプトを適用します。この初回の2結果は、コード編集前後の組ではありません。PowerShellでは`Tee-Object`で表示と同時に結果を保存します。
 
-```sh
-uv run --project sections/s09 python sections/s09/s09_l06.py --source local
+```powershell
+uv run --project sections/s09 python sections/s09/s09_l06.py --source local 2>&1 | Tee-Object -FilePath s09-l06-before.txt
 ```
+
+macOS / Linuxでは、`2>&1 | tee s09-l06-before.txt`をcommandの末尾に付けてください。出力が届くたびに画面表示と保存を行います。
 
 続いて`sections/s09/s09_l06.py`を開き、`REVISED_PROMPT`の末尾に「影響した注文数は未確認なら未確認と明記してください。」を追加して保存します。`BASELINE_PROMPT`、`sample/incident-note.txt`、入力元、モデル、Regionは変えません。`main`が同じメモを`load_note`で1回読み、`compare`がその文字列を既存の`BASELINE`と`REVISED`の指示で2回の`ask_model`へ渡す箇所をコードで確認してください。表示される2組の回答とtoken量・応答時間が出力です。
 
-同じcommandを再実行し、編集前に控えた`REVISED`の結果と編集後の`REVISED`の結果を並べてください。`BASELINE`と`REVISED`は元から別々の指示であり、画面に並ぶ2つをそのまま「編集前／編集後」とは呼びません。`BASELINE`側のpromptも同じですが、生成結果は実行ごとに揺れるため、文字列の完全一致を合否基準にしません。次にAWS APIを呼ばないunit testを実行し、同じメモを2回の推論へ渡すテストが成功することを確認します。
+同じcommandを再実行し、編集前に控えた`REVISED`の結果と編集後の`REVISED`の結果を並べてください。再実行時も出力を保存します。
+
+```powershell
+uv run --project sections/s09 python sections/s09/s09_l06.py --source local 2>&1 | Tee-Object -FilePath s09-l06-after.txt
+```
+
+macOS / Linuxでは、同じように`2>&1 | tee s09-l06-after.txt`を使います。
+
+`BASELINE`と`REVISED`は元から別々の指示であり、画面に並ぶ2つをそのまま「編集前／編集後」とは呼びません。`BASELINE`側のpromptも同じですが、生成結果は実行ごとに揺れるため、文字列の完全一致を合否基準にしません。`s09-l06-before.txt`と`s09-l06-after.txt`を使って編集前後の`REVISED`を原文と照合します。これらはリポジトリ直下にできるローカル記録で、公開repositoryへ追加しません。出力の上限は1件512 tokensです。応答は`stopReason: end_turn`の完了時だけ表示します。それ以外なら不完全応答として使わず停止し、SDKによる自動再送もしません。次にAWS APIを呼ばないunit testを実行し、同じメモを2回の推論へ渡すテストが成功することを確認します。
 
 ```sh
 uv run --directory sections/s09 python -m unittest discover -s tests -v
