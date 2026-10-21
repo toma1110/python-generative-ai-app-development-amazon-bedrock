@@ -83,7 +83,8 @@ class FileInputTests(unittest.TestCase):
         self.assertEqual(len(client.calls), 1)
         request = client.calls[0]
         self.assertEqual(request["modelId"], "amazon.nova-lite-v1:0")
-        self.assertEqual(request["inferenceConfig"]["maxTokens"], 256)
+        self.assertEqual(request["inferenceConfig"]["maxTokens"], 512)
+        self.assertIn("日本語で100字程度", request["system"][0]["text"])
         self.assertEqual(request["messages"][0]["content"][0]["text"], "次の調査メモを要約してください。\n\n原文の内容")
 
     def test_max_tokens_response_is_not_returned_as_a_complete_summary(self):

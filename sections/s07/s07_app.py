@@ -4,10 +4,10 @@ from pathlib import Path
 import os
 
 DEFAULT_MODEL_ID = "amazon.nova-lite-v1:0"
-MAX_OUTPUT_TOKENS = 256
+MAX_OUTPUT_TOKENS = 512
 MAX_INPUT_CHARACTERS = 12000
 SYSTEM_PROMPT = (
-    "あなたは調査メモを短く要約するアシスタントです。"
+    "あなたは調査メモを日本語で100字程度に要約するアシスタントです。"
     "メモに書かれた事実だけを使い、原因や復旧状況を推測で補わないでください。"
     "不明な項目は不明と明記し、対応を指示しないでください。"
 )
