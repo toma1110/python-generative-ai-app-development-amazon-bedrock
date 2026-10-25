@@ -41,7 +41,7 @@ macOS / Linuxでは`python3 hello.py`を使います。`Hello, Python!`と、こ
 
 ## L03: 仮想環境（venv）とpipでライブラリを分ける
 
-venvはVMやコンテナのようにOSを仮想化する仕組みではありません。プロジェクト用のPython実行環境と、そこから使うパッケージの置き場所を分けます。ベースPythonはvenvを作る元のPython、`.venv`内のPythonはプロジェクトから使うPython、pipは実行したPython環境へパッケージを入れる道具です。たとえば、アプリAが`requests` 2系、アプリBが別の版を必要としても、それぞれのvenvへ分ければ同じベースPythonを使いながら依存関係を混ぜずに済みます。
+venvはVMやコンテナのようにOSを仮想化する仕組みではありません。プロジェクト用のPython実行環境と、そこから使うパッケージの置き場所を分けます。ベースPythonはvenvを作る元のPython、`.venv`内のPythonはプロジェクトから使うPython、pipは実行したPython環境へパッケージを入れる道具です。たとえば、アプリAが`requests` 2系、アプリBが別のバージョンを必要としても、それぞれのvenvへ分ければ同じベースPythonを使いながら依存関係を混ぜずに済みます。
 
 L02で使ったターミナルを続けて使います。現在の場所は`l02`なので、まずリポジトリの最上位フォルダーへ戻ります。
 
@@ -80,7 +80,7 @@ python inspect_package.py
 
 仮想環境のPython実行ファイル、`sys.prefix`、元の場所を示す`sys.base_prefix`、`requests`のバージョンとファイル位置が表示されます。`sys.prefix`と`requests`の場所が`.venv`の下、`sys.base_prefix`がベースPythonの場所であることを確認します。表示されるパスの区切りやユーザー名部分は環境によって異なります。
 
-同じフォルダーをVS Codeで開き、`Python: Select Interpreter`から`.venv`内のPythonを選びます。VS Codeから`inspect_package.py`を実行し、CLIと同じ`.venv`の場所、requestsの版と場所が表示されることを確かめます。ベースPythonを選ぶと、ベース側にrequestsが入っていない環境では`ModuleNotFoundError`になります。これはファイルの故障ではなく、実行したPython環境にパッケージがない状態です。
+同じフォルダーをVS Codeで開き、`Python: Select Interpreter`から`.venv`内のPythonを選びます。VS Codeから`inspect_package.py`を実行し、CLIと同じ`.venv`の場所、`requests`のバージョンと場所が表示されることを確かめます。ベースPythonを選ぶと、ベース側にrequestsが入っていない環境では`ModuleNotFoundError`になります。これはファイルの故障ではなく、実行したPython環境にパッケージがない状態です。
 
 有効化ができない場合は、仮想環境のPythonを直接指定します。
 
@@ -114,7 +114,7 @@ uv run --locked python section02_demo.py "DB接続数を確認する"
 
 アプリはUTF-8で文字を出力します。Windowsの古いコンソールで日本語が正しく表示されない場合は、VS Codeの統合ターミナルまたはUTF-8に対応したWindows Terminalで実行してください。
 
-`pyproject.toml`にはプロジェクト設定と直接使う依存関係、`uv.lock`（ロックファイル）には依存先を含む解決済みの版が記録されます。`uv sync --locked`はこの2ファイルを照合し、lockfileがない場合や更新が必要な場合はエラーにして、lockfileを書き換えずに環境を準備します。`uv run --locked`も実行前にlockfileの状態を確認します。エラーになったら`pyproject.toml`と`uv.lock`の両方が演習用リポジトリの版かを確認し、意図しない編集があれば戻してから再実行します。依存関係を意図して変更する開発作業では、`uv lock`でlockfileを更新し、差分を確認してから使います。この演習では依存関係を変更しません。uvはvenvを含む環境準備と依存関係の同期をまとめて扱います。venvは環境の分離、pipはそのPythonへパッケージを入れる操作、requirements.txtはpip向け依存関係一覧です。これらは同じ役割ではありません。別のPCでも定義から準備できますが、Pythonの版やOSによる差は別途確認します。
+`pyproject.toml`にはプロジェクト設定と直接使う依存関係、`uv.lock`（ロックファイル）には依存先を含む解決済みのバージョンが記録されます。`uv sync --locked`はこの2ファイルを照合し、lockfileがない場合や更新が必要な場合はエラーにして、lockfileを書き換えずに環境を準備します。`uv run --locked`も実行前にlockfileの状態を確認します。エラーになったら`pyproject.toml`と`uv.lock`の両方が演習用リポジトリの内容と一致しているかを確認し、意図しない編集があれば戻してから再実行します。依存関係を意図して変更する開発作業では、`uv lock`でlockfileを更新し、差分を確認してから使います。この演習では依存関係を変更しません。uvはvenvを含む環境準備と依存関係の同期をまとめて扱います。venvは環境の分離、pipはそのPythonへパッケージを入れる操作、requirements.txtはpip向け依存関係一覧です。これらは同じ役割ではありません。別のPCでも定義から準備できますが、PythonのバージョンやOSによる差は別途確認します。
 
 ## 想定と異なる場合
 
