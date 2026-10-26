@@ -21,7 +21,7 @@ aws s3api list-objects-v2 --bucket <bucket> --profile <profile> --region <region
 aws s3api get-bucket-versioning --bucket <bucket> --profile <profile> --region <region> --query Status --output text
 ```
 
-オブジェクト一覧が`["training/s09/incident-note.txt"]`で、versioningの状態が設定なし（CLI出力の`None`）なら次へ進めます。別のkeyが一つでもある、一覧が空、versioningが有効または停止状態になっている場合は、この手順で一括削除しません。別のデータや過去versionが含まれる可能性があるため、内容と所有者を確認してください。
+オブジェクト一覧が`["training/s09/incident-note.txt"]`で、バージョニングの状態が設定なし（CLI出力の`None`）なら次へ進めます。別のkeyが一つでもある、一覧が空、バージョニングが有効または停止状態になっている場合は、この手順で一括削除しません。別のデータや過去のオブジェクトバージョンが含まれる可能性があるため、内容と所有者を確認してください。
 
 ## オブジェクトを削除して確認する
 
@@ -37,7 +37,7 @@ aws s3api delete-object --bucket <bucket> --key training/s09/incident-note.txt -
 aws s3api list-objects-v2 --bucket <bucket> --profile <profile> --region <region> --query 'Contents[].Key' --output json
 ```
 
-空の場合は`[]`または`null`が表示されます。keyが残っている、または一覧を確認できない場合はバケットを削除しません。`delete-object`を実行しても、versioningが有効なバケットではdelete markerが作成されるだけの場合があります。versioningが有効または停止状態なら、version IDを確認せずに削除を続けないでください。
+空の場合は`[]`または`null`が表示されます。keyが残っている、または一覧を確認できない場合はバケットを削除しません。`delete-object`を実行しても、バージョニングが有効なバケットではdelete markerが作成されるだけの場合があります。バージョニングが有効または停止状態なら、バージョンIDを確認せずに削除を続けないでください。
 
 ## 空のバケットを削除して確認する
 
@@ -107,5 +107,5 @@ test ! -e sections/s09/.venv && echo "s09の仮想環境を削除しました"
 ## 参考資料
 
 - [Amazon S3バケットの削除](https://docs.aws.amazon.com/AmazonS3/latest/userguide/delete-bucket.html)
-- [Amazon S3オブジェクトversionの削除](https://docs.aws.amazon.com/AmazonS3/latest/userguide/DeletingObjectVersions.html)
+- [Amazon S3オブジェクトバージョンの削除](https://docs.aws.amazon.com/AmazonS3/latest/userguide/DeletingObjectVersions.html)
 - [Amazon S3料金表](https://aws.amazon.com/s3/pricing/)
