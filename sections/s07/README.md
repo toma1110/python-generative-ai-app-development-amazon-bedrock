@@ -115,17 +115,43 @@ macOS / Linux:
 )
 ```
 
-空のファイルでは内容が空という案内になります。文字コードがUTF-8でない場合、フォルダーを指定した場合、読み取り権限がない場合も、それぞれ利用者が次に確認する内容を表示します。例外tracebackやファイル内容は表示しません。引数`--file`を付け忘れたときは、argparseが使い方を案内します。
+空のファイルでは内容が空という案内になります。文字コードがUTF-8でない場合、フォルダーを指定した場合、読み取り権限がない場合も、それぞれ利用者が次に確認する内容を表示します。ファイルを読めても本文が20文字未満なら、入力チェックが短すぎることを案内します。これはファイルの読み込みエラーではなく、読み込み後に本文を確かめる処理の結果です。例外tracebackやファイル内容は表示しません。引数`--file`を付け忘れたときは、argparseが使い方を案内します。
 
-## L05: APIを呼ばずにファイル処理をテストする
+## L05: 入力条件を変更し、テストで確かめる
 
-テストの目的は、ファイル読み込みや入力確認を変更したときに、正しい文字列が返ること、入力不足やファイル異常を区別できることを確かめることです。`read_text_file(path)`はパスを受け取り文字列を返す関数で、AWSクライアントを使いません。Bedrockを呼ぶ`summarize_text(client, text)`とは引数で境界が分かれているので、ファイル側だけを確認するテストにAWSクライアントや認証情報は要りません。
+ここでは、短すぎるメモをBedrockへ送る前に止める動作を確かめます。確認するのは要約の品質ではなく、本文の長さを調べる入力チェックです。アプリ全体では、`s07_l02.py` がファイルを読み、`s07_app.py` の `validate_input` が本文を整え、長さを確認してから `summarize_text` がBedrockへ渡します。今回はそのうち、`validate_input` にある最小文字数の条件を変更します。
 
-ファイル処理のテストは、一時ディレクトリーにテスト専用ファイルを作り、そのパスを `read_text_file` に渡します。通常のUTF-8ファイルなら期待文字列と完全一致することを比較し、空白だけなら `EmptyInputError`、存在しないファイルならPython標準の `FileNotFoundError`、UTF-8として読めない内容なら `UnicodeDecodeError` が発生することを確認します。ここでは `create_client` を呼ばず、AWSへ接続しません。L02でも、まずファイルを読み、その後でクライアントを作ります。ファイルが見つからない場合にクライアント生成が呼ばれないこともテストします。
+最初の配布状態では `MIN_INPUT_CHARACTERS` とテストの期待値が20で、Section 07の17件すべてが通ります。まず `sections/s07` で次のコマンドを実行し、初期状態を確かめてください。これは最初から失敗するテストを配る演習ではありません。境界テストは20文字を受け入れ、21文字も受け入れ、19文字では `InputTooShortError` になることを確認します。
 
-Converseのテストでは `FakeClient` を `summarize_text` に渡します。このfakeはAWSの代わりに呼び出し引数を記録し、あらかじめ決めた応答を返します。テストは送信回数、モデルID、user本文の完全な内容、出力上限、返された応答文を確認します。また、`end_turn`の応答、`max_tokens`の応答、text blockがない応答を区別します。空入力では呼び出し回数がゼロのままであることも確認します。いずれのテストも実際のBedrockへ接続しません。
+```text
+uv run python -m unittest discover -s tests -v
+```
 
-期待値との完全一致が何を守るかは、既存の `test_reads_utf8_text_and_trims_outer_whitespace` で確認できます。通常どおりテストが通ることを確認したあと、そのテスト内の期待文字列 `"調査メモです。"` を一時的に `"調査メモです。誤り"` に変えて同じコマンドを実行してください。失敗表示の期待値と実際の値を読み、読み込み結果とどこが違うか確認できます。確認後は期待文字列を `"調査メモです。"` に戻し、もう一度実行して通る状態にします。誤った期待値は保存・共有しないでください。
+この課題では別の解答用ファイルを使わず、実行対象のアプリとテストを編集します。リポジトリ最上位から開くファイルは `sections/s07/s07_app.py` と `sections/s07/tests/test_s07.py` です。テストコマンドは `sections/s07` ディレクトリーを現在の場所として実行します。
+
+短いメモだけでは要約の材料が足りないケースを避けるため、まず `sections/s07/s07_app.py` の `MIN_INPUT_CHARACTERS` を20から40へ変更します。テストの期待値はまだ20のままにして、`sections/s07` から次の2件を実行してください。どちらも20/21文字を受け入れる旧仕様のテストなので、新しい40文字条件を実装した時点では失敗します。この結果を見て、実装とテストが別々の役割を持つことを確認します。
+
+```text
+uv run python -m unittest tests.test_s07.FileInputTests.test_accepts_input_at_the_minimum_length -v
+uv run python -m unittest tests.test_s07.FileInputTests.test_accepts_input_above_the_minimum_length -v
+```
+
+次に `sections/s07/tests/test_s07.py` の `EXPECTED_MINIMUM_LENGTH` を20から40へ変更します。テスト側は実装定数を読み取らず期待条件を独立して持つため、実装だけを変えた場合に旧条件を見逃しません。実装と期待仕様の両方を変更した後、次の3つの境界テストを個別に実行してからSectionの全17件を実行します。
+
+```text
+uv run python -m unittest tests.test_s07.FileInputTests.test_accepts_input_at_the_minimum_length -v
+uv run python -m unittest tests.test_s07.FileInputTests.test_accepts_input_above_the_minimum_length -v
+uv run python -m unittest tests.test_s07.FileInputTests.test_rejects_input_below_the_minimum_length -v
+uv run python -m unittest discover -s tests -v
+```
+
+変更後は40文字と41文字の本文が受け入れられ、39文字では `InputTooShortError` になることを確認します。`test_too_short_input_does_not_call_the_model` は、短すぎる本文がBedrock呼び出し前に拒否され、clientの呼び出し回数が0回であることも確かめます。L04の `test_l04_reports_short_input_without_traceback` は、39文字のファイルをCLIへ渡したとき利用者向け案内と終了コード2が返ることを確認します。変更した条件と正常・異常のテスト結果を対応づけて説明してください。テストが失敗したら、表示された期待値と実際の値を読み、コードまたはテストのどちらに変更漏れがあるか調べます。期待値をわざと誤らせて失敗を作る作業はしません。
+
+この長さの確認に必要なのはローカルの文字列とPythonだけです。本文をBedrockへ渡す前の条件なので、まずここを手元で繰り返し確認すれば、AWSの認証・通信やモデルの応答に左右されず、入力チェックを変更した効果が分かります。L02の実行は別の確認です。L02では実際にBedrockへ要約を依頼し、原文と応答を見比べます。このユニットテストだけではAWS接続やモデルの要約品質は確認しません。
+
+ファイル読み込みテストは、一時ファイルを作ってパスを `read_text_file` へ渡し、戻り値や例外を確認します。ファイルがない、空白だけ、UTF-8で読めない場合は、ファイル読み込みと入力確認のそれぞれの結果をテストします。`read_text_file` はローカルファイルだけを扱い、Bedrock clientを受け取りません。
+
+`FakeClient` を使うAPI境界のテストは、`summarize_text(client, text)` が本文・モデルID・出力上限を `client.converse` へ渡し、応答からテキストを取り出すことを確認します。FakeClientは渡された引数を記録し、決めておいた応答を返すテスト用の相手です。実際のAWS接続やモデル応答の正しさまでは確認しません。AWSへ接続して要約を得る動作はL02の実行で確かめ、要約の各文は原文と照合します。
 
 テストを実行します。
 

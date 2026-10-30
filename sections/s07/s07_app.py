@@ -5,6 +5,7 @@ import os
 
 DEFAULT_MODEL_ID = "amazon.nova-lite-v1:0"
 MAX_OUTPUT_TOKENS = 512
+MIN_INPUT_CHARACTERS = 20
 MAX_INPUT_CHARACTERS = 12000
 SYSTEM_PROMPT = (
     "あなたは調査メモを日本語で100字程度に要約するアシスタントです。"
@@ -17,6 +18,10 @@ class EmptyInputError(ValueError):
     """Raised when a text file contains no usable text."""
 
 
+class InputTooShortError(ValueError):
+    """Raised when a text file is too short to summarize usefully."""
+
+
 class InputTooLongError(ValueError):
     """Raised when a text file exceeds the exercise's input-size guard."""
 
@@ -26,10 +31,14 @@ class IncompleteResponseError(ValueError):
 
 
 def validate_input(text):
-    """Return trimmed input text or raise a clear error for blank content."""
+    """Return trimmed input text or raise a clear error for unusable content."""
     if not isinstance(text, str) or not text.strip():
         raise EmptyInputError("ファイルの内容が空です。テキストを追加してください。")
     cleaned = text.strip()
+    if len(cleaned) < MIN_INPUT_CHARACTERS:
+        raise InputTooShortError(
+            f"入力が短すぎます。{MIN_INPUT_CHARACTERS}文字以上の調査メモを指定してください。"
+        )
     if len(cleaned) > MAX_INPUT_CHARACTERS:
         raise InputTooLongError(f"入力が{MAX_INPUT_CHARACTERS}文字を超えています。短いテキストファイルを指定してください。")
     return cleaned
