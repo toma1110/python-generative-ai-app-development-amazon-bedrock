@@ -8,7 +8,7 @@
 
 ## L04: AWSへ接続する準備
 
-L04を実行する場合だけ、次のAWS接続設定を準備します。
+Course仕様に合わせ、L04は受講者のPC上でCLIまたはVS Codeから実行する手順を示します。PCでL04を実行する場合だけ、次のAWS接続設定を準備します。
 
 - Python 3.11以降
 - `uv`
@@ -65,14 +65,9 @@ get_caller_identity()はAWSへ接続先を問い合わせ、結果をPythonの�
 
 ## 実行結果と接続先の判断
 
-実AWSで上のコマンドを実行すると、プログラムはSTSから受け取ったAccount IDと、boto3 Sessionから選んだRegionを次の形式で表示します。下の `123456789012` は、テストで使う架空の12桁IDです。ユニットテストではAWS呼び出しをmockし、実際に `main()` を実行してstdoutがこの2行になることを確認しました。この出力例はオフラインmockの結果で、実AWSの実行結果ではありません。
+この演習ではAWSへ接続し、STSの応答からAccount IDを、boto3 Sessionの設定からRegionを表示します。成功時には自分が実行した本物の値が出ます。固定の成功出力例や架空のAccount IDは使いません。実行後、表示されたAccount IDが選んだAWSアカウントと一致すること、Regionが予定している `ap-northeast-1` であることを確認してください。一致しない場合は次へ進まず、プロファイルとシェルの設定を見直します。Account IDや認証情報を公開の投稿、画像、動画へ載せないでください。
 
-```text
-接続先アカウント: 123456789012
-接続先リージョン: ap-northeast-1
-```
-
-実際の実行後は、1行目のAccount IDが選んだAWSアカウントのIDと完全に一致すること、2行目が演習で使う予定の `ap-northeast-1` であることを確認します。IDが違う場合や、予定Regionと違う場合は次の操作へ進まず、選んだプロファイルとシェルの設定を見直してください。例の12桁IDを自分のAWSアカウントだと見なさないでください。
+CloudShellはAWS Consoleから利用できるLinux shellですが、このCourseの実行環境は受講者のPC（CLI / VS Code）です。このREADMEにはCloudShellでのrepository取得、依存関係準備、演習directory、実行手順を示していないため、上記のPC向け手順をCloudShellへそのまま適用しないでください。
 
 この確認はAWSの読み取り専用APIを1回呼び出します。`GetCallerIdentity`にはIAM権限の追加が不要です。AWS resourceを作成・変更せず、Bedrockのモデルも呼び出しません。
 
@@ -151,6 +146,7 @@ test ! -e sections/s04/l04/.venv && echo "演習用仮想環境を削除しま�
 - [AWS CLI: get-caller-identity](https://docs.aws.amazon.com/cli/latest/reference/sts/get-caller-identity.html)
 - [AWS STS API: GetCallerIdentity](https://docs.aws.amazon.com/STS/latest/APIReference/API_GetCallerIdentity.html)
 - [AWS IAM: Service cost information (IAM, IAM Identity Center, and STS)](https://docs.aws.amazon.com/IAM/latest/UserGuide/introduction.html)
+- [AWS CloudShell: features and pricing](https://docs.aws.amazon.com/cloudshell/latest/userguide/welcome.html)
 - [AWS Secrets Manager: Retrieve secrets](https://docs.aws.amazon.com/secretsmanager/latest/userguide/retrieving-secrets.html)
 
 この教材コードはリポジトリのルートにある[MIT License](../../LICENSE)の条件で利用できます。
