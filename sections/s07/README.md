@@ -129,6 +129,8 @@ uv run python -m unittest discover -s tests -v
 
 この課題では別の解答用ファイルを使わず、実行対象のアプリとテストを編集します。リポジトリ最上位から開くファイルは `sections/s07/s07_app.py` と `sections/s07/tests/test_s07.py` です。テストコマンドは `sections/s07` ディレクトリーを現在の場所として実行します。
 
+`FileInputTests` は `unittest.TestCase` を継承して作ったテスト用のクラスです。`TestCase` がテスト実行に必要な機能や `assertEqual`、`assertRaises` などの確認用メソッドを用意するため、テストごとの判定処理を自分で作らずに使えます。各 `test_` メソッドの `self` は、そのテストを実行している `FileInputTests` のオブジェクトを指します。そのため `self.assertEqual(...)` はそのテストの期待値と実際の値を比べ、`self.assertRaises(...)` はそのテストで指定した例外が起きるかを確かめます。
+
 短いメモだけでは要約の材料が足りないケースを避けるため、まず `sections/s07/s07_app.py` の `MIN_INPUT_CHARACTERS` を20から40へ変更します。テストの期待値はまだ20のままにして、`sections/s07` から次の2件を実行してください。どちらも20/21文字を受け入れる旧仕様のテストなので、新しい40文字条件を実装した時点では失敗します。この結果を見て、実装とテストが別々の役割を持つことを確認します。
 
 ```text
