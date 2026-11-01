@@ -55,9 +55,17 @@ uv run python main.py
 
 プログラムはSTSの`GetCallerIdentity`を呼び、応答に含まれるAWS Account IDと、boto3セッションが選んだリージョンを表示します。Account IDが自分の想定したAWSアカウントと一致すること、リージョンが演習で使う予定のものと一致することを確認してください。ARNや認証情報は表示しません。違うアカウントが表示された場合は、そのまま次の演習へ進まず、プロファイルやシェルの設定を確認します。
 
-CLIの設定をPythonへ渡すのではなく、Python内のboto3もAWSの設定元を参照します。boto3.Session()は実行環境で選んだプロファイルや認証情報を扱い、session.region_nameは設定から解決されたリージョンを示します。次にsession.client("sts", region_name=region)でSTS APIを呼び出すclientを作ります。このclientはSessionの認証情報とリージョンを使います。
+実コードの各部分をPythonの基礎用語と対応させます。丸括弧`()`のある箇所はクラスやメソッドの呼び出しで、`session.region_name`は丸括弧なしの属性参照です。
 
-get_caller_identity()はAWSへ接続先を問い合わせ、結果をPythonの辞書として返します。response["Account"]は辞書のAccountというkeyからAccount IDを取り出す書き方です。今回のプログラムは、ここで取り出した値とリージョンだけを表示します。
+| コード | Pythonの要素 | このプログラムでの役割 |
+| --- | --- | --- |
+| `boto3.Session()` | クラスの呼び出し | `Session`クラスからSession objectを作り、変数`session`へ代入します。 |
+| `session.client("sts", region_name=region)` | メソッドの呼び出し | `session` objectの`client`メソッドがSTS client objectを返します。Sessionの認証情報と指定したリージョンを使います。 |
+| `session.region_name` | property（属性）の参照 | `session` objectから設定済みリージョンの値を読みます。ここでは括弧を付けて呼び出しません。 |
+| `sts_client.get_caller_identity()` | clientのメソッド呼び出し | STSの`GetCallerIdentity` APIを実行し、応答をPythonの辞書として受け取ります。 |
+| `response["Account"]` | 辞書のkey参照 | 応答辞書から`Account`の値（AWS Account ID）を取り出します。 |
+
+`client(...)`が作るのは、STS操作に使うclient objectです。この演習の`GetCallerIdentity`要求は、その後の`get_caller_identity()`で行います。今回のプログラムはAccount IDとリージョンだけを表示します。
 
 ここではS03で学んだ変数、関数、辞書を使っています。`main()`が`session`と`region`を変数に入れて`read_target()`へ渡し、関数がresponse辞書から`account_id`を取り出して返します。呼び出し元の`main()`は、その値と`region`を`print()`で表示します。Account IDはSTS応答の`Account`から、Regionはboto3 Sessionの設定から来ます。STS応答自体にRegionは含まれません。
 
