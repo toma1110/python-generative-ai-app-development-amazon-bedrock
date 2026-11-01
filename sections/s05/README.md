@@ -56,6 +56,8 @@ uv run python s05_l02.py
 
 `client.converse()`には`modelId`と`messages`をPythonの引数として渡します。boto3は`modelId`をConverse APIのURI（`/model/{modelId}/converse`）に使い、`messages`、`system`、`inferenceConfig`などの本文フィールドはPythonの値からJSONリクエストにして送信します。JSONレスポンスはPythonのdictionaryやlistにして返るため、JSON文字列を自分で組み立てる必要はありません。応答の形は次のようになります（構造を示す例で、`text`の内容は実行ごとに変わります）。
 
+`modelId=...`や`messages=...`は、関数へ`name=value`の形で渡すPythonの名前付き引数です。これは、上の`{"role": "user"}`のようにdictionaryの中で`key: value`を組み立てる書き方とは別です。`messages`にはPython基礎で学んだlistとdictionaryを入れ子にした値を渡します。
+
 ```json
 {"output": {"message": {"content": [{"text": "（モデルが生成した応答文）"}]}}}
 ```
@@ -84,7 +86,7 @@ uv run python s05_l04.py
 
 成功時の`response`は、本文を`output`→`message`→`content`→`text`から、`stopReason`は終了理由から読みます。`usage` dictionaryの`inputTokens`、`outputTokens`、`totalTokens`が入出力のtoken数、`metrics` dictionaryの`latencyMs`が応答時間の指標です。コードではそれぞれを`result`という別のdictionaryへ取り出してから表示します。利用量と応答時間は実際の応答に含まれる値で、固定値ではありません。
 
-AWSがAPIエラーを返した場合はboto3の`ClientError`となり、コードはエラーコードと、あればRequest IDを表示します。呼び出しや通信などSDK側で失敗した場合は`BotoCoreError`として接続先などを確認する案内を表示します。どちらの失敗も終了コード`1`で終わり、成功は`0`です。IAM権限、モデル利用可否、クォータ、プロファイル、リージョン、ネットワークを確認してください。エラー本文には環境固有情報が含まれる可能性があるため、コードは全文を画面へ出しません。調査時にも認証情報や個人情報が含まれないことを確認してから共有します。
+Pythonでは`try`内で起きた例外のうち、`except`に指定した型に一致するものを処理します。AWSがAPIエラーを返した場合はboto3の`ClientError`となり、コードはエラーコードと、あればRequest IDを表示します。呼び出しや通信などSDK側で失敗した場合は`BotoCoreError`として接続先などを確認する案内を表示します。どちらの失敗も終了コード`1`で終わり、成功は`0`です。IAM権限、モデル利用可否、クォータ、プロファイル、リージョン、ネットワークを確認してください。エラー本文には環境固有情報が含まれる可能性があるため、コードは全文を画面へ出しません。調査時にも認証情報や個人情報が含まれないことを確認してから共有します。
 
 ## 自動テスト
 
