@@ -1,0 +1,5 @@
+[
+  {"name": "API応答", "status": "ok"},
+  {"name": "エラーログ", "status": "needs_review"},
+  {"name": "再試行回数", "status": "ok"}
+]
