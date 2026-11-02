@@ -1,6 +1,6 @@
 # PythonからAmazon Bedrockを使うハンズオン
 
-このリポジトリでは、PythonからAmazon Bedrockを使う演習教材をSectionごとに公開しています。Section 02「Pythonの実行環境」からSection 10「おわりに」まで、各SectionのREADMEで実行手順、前提条件、結果の確認、料金の注意、後片付けを確認できます。
+このリポジトリでは、PythonからAmazon Bedrockを使う演習教材をSectionごとに公開しています。各SectionのREADMEで実行手順、前提条件、結果の確認、料金の注意、後片付けを確認できます。
 
 ## 教材の取得
 
@@ -13,6 +13,8 @@ Sectionごとの演習は次のとおりです。
 | 学習内容 | 演習 |
 | --- | --- |
 | Python環境と基本構文 | [Section 02](sections/s02/README.md)、[Section 03](sections/s03/README.md) |
+| 関数・モジュール・クラス | [演習README](sections/s12/README.md) |
+| ファイル・JSON・失敗の確認 | [演習README](sections/s13/README.md) |
 | AWS接続とBedrockの呼び出し | [Section 04](sections/s04/README.md)、[Section 05](sections/s05/README.md) |
 | CLI会話とファイル要約 | [Section 06](sections/s06/README.md)、[Section 07](sections/s07/README.md) |
 | 出力の比較と改善 | [Section 08](sections/s08/README.md) |

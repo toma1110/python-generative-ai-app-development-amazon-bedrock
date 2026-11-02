@@ -4,10 +4,12 @@
 
 コマンドは公開repositoryの最上位フォルダーで実行します。Section 2で作った仮想環境を有効にしている場合も、追加パッケージのインストールは必要ありません。Section 2の`requests`は、インストールして使う配布物の例でした。ここではPython標準の仕組みで、同じrepository内の`.py`ファイルをimportします。
 
-## L02: 引数と戻り値で関数の処理を分ける
+## 関数の引数と戻り値を試す
+
+この演習では、[sections/s03/l04のコード](../s03/l04/)を使います。コマンドはrepository最上位から実行します。
 
 ```text
-python sections/s12/l02/main.py
+python sections/s03/l04/main.py
 ```
 
 ```text
@@ -16,40 +18,7 @@ API応答: 確認済み
 再試行回数: 確認済み
 ```
 
-`def classify_check(check)`の`check`は関数内で使う仮引数名です。呼び出し時の`classify_check(check)`では、呼び出し元の`check`の値が渡されます。関数内で`return`した文字列は`show_check`の`result`に入り、その後`print`が画面へ表示します。`return`は値を呼び出し元へ返し、`print`は画面へ出す役割です。
-
-### 値を一つ変えて予想する
-
-`sections/s12/l02/main.py`の`if check["status"] == "needs_review":`を、比較する値だけ`"ok"`へ変えます。実行前に3件の表示を予想してから、同じコマンドを実行します。結果は次のとおりです。
-
-```text
-API応答: 追加確認が必要
-エラーログ: 確認済み
-再試行回数: 追加確認が必要
-```
-
-比較値の変更で3件すべての分類が変わることを確認したら、比較を`"needs_review"`へ戻します。通常の確認に戻した後、必要なら下のテストを実行します。
-
-関数の戻り値だけを確認するテストも実行できます。
-
-```text
-python -m unittest discover -s sections/s12/l02 -p "test_*.py" -v
-```
-
-### 独立した失敗例: returnの代わりにprintする
-
-通常コードを変更せず、別ファイルの例を実行します。
-
-```text
-python sections/s12/l02/return_vs_print_demo.py
-```
-
-```text
-確認済み
-受け取った値: None
-```
-
-`print("確認済み")`は文字を表示しますが、関数からその文字列を返しません。呼び出し元が受け取る値は`None`です。失敗例は通常の`main.py`とは独立しているため、比較を終えたらコードを戻す必要はありません。
+`sections/s03/l04/main.py`の`if check["status"] == "needs_review":`を、比較する値だけ`"ok"`へ変えて同じコマンドを実行すると、API応答と再試行回数が「追加確認が必要」、エラーログが「確認済み」と表示されます。変更後は`"needs_review"`へ戻してください。
 
 ## L03: importで自作モジュールの関数を呼び出す
 
@@ -75,3 +44,27 @@ python -m unittest discover -s sections/s12/l03 -p "test_*.py" -v
 ```
 
 `ModuleNotFoundError`が出た場合は、`main.py`と`check_data.py`が両方`sections/s12/l03/`にあり、コマンドをrepository最上位で実行したかを確認します。このSectionはローカルファイルだけを扱い、AWSリソースや料金は発生しません。
+
+## クラス・インスタンス・メソッドの演習
+
+この演習では、関数版とクラス版で同じ表示を作ります。実行します。
+
+```text
+python -X utf8 sections/s12/l04/class_check_item.py
+```
+
+```text
+API応答: ok
+API応答: ok
+```
+
+1行目は関数、2行目は`CheckItem`クラスのインスタンスが`format`メソッドで作った結果です。どちらも`status`だけを受け取り、`API応答`は固定の表示名です。`return`は文字列を呼び出し元へ返し、`print`が画面へ表示します。
+
+`sections/s12/l04/class_check_item.py`の`CheckItem("ok")`にある`"ok"`だけを`"needs_review"`に変え、実行前に2行目を予想してください。実行すると次のようになります。
+
+```text
+API応答: ok
+API応答: needs_review
+```
+
+確認後は値を`"ok"`へ戻します。この演習はローカルで動作し、AWSへの接続は不要です。

@@ -1,19 +1,18 @@
-def format_check(name, status):
-    return f"{name}: {status}"
+def format_check(status):
+    return f'API応答: {status}'
 
 
 class CheckItem:
-    def __init__(self, name, status):
-        self.name = name
+    def __init__(self, status):
         self.status = status
 
     def format(self):
-        return f"{self.name}: {self.status}"
+        return f'API応答: {self.status}'
 
 
-function_message = format_check("API応答", "ok")
+function_message = format_check("ok")
 print(function_message)
 
-item = CheckItem("API応答", "ok")
+item = CheckItem("ok")
 message = item.format()
 print(message)
