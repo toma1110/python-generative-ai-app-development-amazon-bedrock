@@ -64,7 +64,14 @@ uv run python s06_l02.py
 uv run python s06_l03.py
 ```
 
-まず「私は東京に住んでいます」と入力し、次に「私はどこに住んでいますか」と聞きます。2回目のリクエストには最初のuserメッセージとassistant応答も含まれます。`/exit`または`/quit`で終了します。
+次の二つの入力を、この順に行います。どちらも架空の設定です。
+
+```text
+In this fictional demo, my imaginary project code is ORBIT-47. Remember it for this conversation.
+What is my imaginary project code? Answer with the code only. If no code was provided, say you do not know.
+```
+
+`/exit`または`/quit`で終了します。履歴ありでは、2回目のリクエストに最初のuserメッセージ、1回目の実際のassistant応答、2回目のuserメッセージが含まれます。
 
 同じ流れを履歴なしでも試します。
 
@@ -72,15 +79,17 @@ uv run python s06_l03.py
 uv run python s06_l03.py --no-history
 ```
 
-2回目の質問にはその質問だけが送られます。応答はモデルや実行ごとに異なりますが、リクエストの`messages`に過去のやり取りがあるかどうかをコードで確認できます。履歴が長くなると、各回で送る入力token数と料金が増えることにも注目してください。
+同じ二つの入力を、この順にもう一度行います。履歴なしでは、1回目の質問はBedrockへ送られますが、2回目のリクエストには続きの質問だけが含まれます。
+
+2026-11-06に同じ入力をAmazon Nova Liteへ東京リージョンのConverse APIで直接渡した比較（`maxTokens=128`、`temperature=0`）では、履歴ありの2回目は`Your imaginary project code is ORBIT-47.`、履歴なしの2回目は`I do not know.`と返りました。これは一度の比較での実際の応答で、CLIの実行結果ではありません。このCLIでは`temperature`を指定していないため、応答条件は同一ではありません。モデルの応答は実行ごとに変わるため、同じ文面になる保証はありません。履歴なしのモデルが値を推測しても、送信messagesに過去の情報が含まれない点はコードで確かめられます。履歴が長くなると、各回で送る入力token数と料金が増えることにも注目してください。
 
 ここでの`history`は、チャット中だけ使うlistです。`chat()`の最初に`history = []`で空のlistを作り、`while True`の各周回で質問を受け取ります。`converse_turn()`は履歴ありの場合、`messages = [*history, user_message]`で履歴の要素を順に含めた新しいlistを作り、現在の質問のdictを末尾に加えて送ります。2回目の質問なら、送信直前の形は概ね次のようになります。
 
 ```python
 messages = [
-    {"role": "user", "content": [{"text": "私は東京に住んでいます"}]},
-    {"role": "assistant", "content": [{"text": "モデルが返した応答"}]},
-    {"role": "user", "content": [{"text": "私はどこに住んでいますか"}]},
+    {"role": "user", "content": [{"text": "In this fictional demo, my imaginary project code is ORBIT-47. Remember it for this conversation."}]},
+    {"role": "assistant", "content": [{"text": "1回目にモデルが実際に返した応答"}]},
+    {"role": "user", "content": [{"text": "What is my imaginary project code? Answer with the code only. If no code was provided, say you do not know."}]},
 ]
 ```
 
