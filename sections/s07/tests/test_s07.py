@@ -1,15 +1,15 @@
 import tempfile
 import unittest
-from contextlib import redirect_stderr
+from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 
-from s07_app import EmptyInputError, IncompleteResponseError, InputTooLongError, InputTooShortError, read_text_file, summarize_text, validate_input
+from s07_app import EmptyInputError, IncompleteResponseError, InputTooLongError, read_text_file, summarize_text, validate_input
 from s07_l02 import main as l02_main
 from s07_l04 import main as l04_main
 
 TEST_INPUT = "この文章はテスト用に用意した架空の調査メモ本文です。入力境界も併せて確認します。"
-EXPECTED_MINIMUM_LENGTH = 20
+MAX_INPUT_CHARACTERS = 12000
 
 
 class FakeClient:
@@ -37,39 +37,50 @@ class FileInputTests(unittest.TestCase):
         with self.assertRaises(EmptyInputError):
             validate_input(" \n\t ")
 
-    def test_accepts_input_at_the_minimum_length(self):
-        text = "x" * EXPECTED_MINIMUM_LENGTH
+    def test_accepts_one_character_after_trimming(self):
+        self.assertEqual(validate_input("  x  "), "x")
+
+    def test_accepts_input_at_the_maximum_length(self):
+        text = "x" * MAX_INPUT_CHARACTERS
         self.assertEqual(validate_input(text), text)
 
-    def test_accepts_input_above_the_minimum_length(self):
-        text = "x" * (EXPECTED_MINIMUM_LENGTH + 1)
+    def test_accepts_input_below_the_maximum_length(self):
+        text = "x" * (MAX_INPUT_CHARACTERS - 1)
         self.assertEqual(validate_input(text), text)
 
-    def test_rejects_input_below_the_minimum_length(self):
-        with self.assertRaises(InputTooShortError):
-            validate_input("x" * (EXPECTED_MINIMUM_LENGTH - 1))
+    def test_rejects_input_above_the_exercise_limit(self):
+        with self.assertRaises(InputTooLongError):
+            validate_input("x" * (MAX_INPUT_CHARACTERS + 1))
 
-    def test_l04_reports_short_input_without_traceback(self):
+    def test_l04_accepts_short_meaningful_file(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "short.txt"
-            path.write_text("x" * (EXPECTED_MINIMUM_LENGTH - 1), encoding="utf-8")
+            path.write_text("x", encoding="utf-8")
+            output = StringIO()
+
+            with redirect_stdout(output):
+                result = l04_main(["--file", str(path)])
+
+        self.assertEqual(result, 0)
+        self.assertIn("1文字の入力を読み込みました", output.getvalue())
+
+    def test_l04_reports_blank_file_without_traceback(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "blank.txt"
+            path.write_text(" \n", encoding="utf-8")
             error_output = StringIO()
 
             with redirect_stderr(error_output):
                 result = l04_main(["--file", str(path)])
 
         self.assertEqual(result, 2)
-        self.assertIn(f"{EXPECTED_MINIMUM_LENGTH}文字以上", error_output.getvalue())
+        self.assertIn("内容が空", error_output.getvalue())
         self.assertNotIn("Traceback", error_output.getvalue())
-
-    def test_rejects_input_above_the_exercise_limit(self):
-        with self.assertRaises(InputTooLongError):
-            validate_input("x" * 12001)
 
     def test_l04_reports_oversized_file_without_traceback(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "long.txt"
-            path.write_text("x" * 12001, encoding="utf-8")
+            path.write_text("x" * (MAX_INPUT_CHARACTERS + 1), encoding="utf-8")
             error_output = StringIO()
 
             with redirect_stderr(error_output):
@@ -143,13 +154,14 @@ class FileInputTests(unittest.TestCase):
 
         self.assertEqual(client.calls, [])
 
-    def test_too_short_input_does_not_call_the_model(self):
+    def test_short_meaningful_input_is_sent_to_the_stub(self):
         client = FakeClient()
 
-        with self.assertRaises(InputTooShortError):
-            summarize_text(client, "x" * (EXPECTED_MINIMUM_LENGTH - 1))
+        result = summarize_text(client, "x")
 
-        self.assertEqual(client.calls, [])
+        self.assertEqual(result, "確認できた事実の要約です。")
+        self.assertEqual(len(client.calls), 1)
+        self.assertEqual(client.calls[0]["messages"][0]["content"][0]["text"], "次の調査メモを要約してください。\n\nx")
 
     def test_api_free_file_tests_do_not_create_a_bedrock_client(self):
         # File validation operates on local text and has no client parameter.

@@ -3,11 +3,11 @@
 import argparse
 import sys
 
-from s07_app import EmptyInputError, InputTooLongError, InputTooShortError, read_text_file
+from s07_app import EmptyInputError, InputTooLongError, read_text_file
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="入力不足とファイル読み込み失敗を確認します")
+    parser = argparse.ArgumentParser(description="入力条件とファイル読み込み失敗を確認します")
     parser.add_argument("--file", required=True, help="確認するUTF-8テキストファイル")
     args = parser.parse_args(argv)
 
@@ -26,9 +26,6 @@ def main(argv=None):
         print("ファイルを読む権限がありません。アクセス権を確認してください。", file=sys.stderr)
         return 2
     except EmptyInputError as error:
-        print(str(error), file=sys.stderr)
-        return 2
-    except InputTooShortError as error:
         print(str(error), file=sys.stderr)
         return 2
     except InputTooLongError as error:

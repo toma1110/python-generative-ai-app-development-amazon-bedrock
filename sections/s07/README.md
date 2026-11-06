@@ -115,45 +115,45 @@ macOS / Linux:
 )
 ```
 
-空のファイルでは内容が空という案内になります。文字コードがUTF-8でない場合、フォルダーを指定した場合、読み取り権限がない場合も、それぞれ利用者が次に確認する内容を表示します。ファイルを読めても本文が20文字未満なら、入力チェックが短すぎることを案内します。これはファイルの読み込みエラーではなく、読み込み後に本文を確かめる処理の結果です。例外tracebackやファイル内容は表示しません。引数`--file`を付け忘れたときは、argparseが使い方を案内します。
+空のファイルでは内容が空という案内になります。文字コードがUTF-8でない場合、フォルダーを指定した場合、読み取り権限がない場合も、それぞれ利用者が次に確認する内容を表示します。ファイルを読めた後、本文が空白だけなら内容が空という案内になります。これはファイルの読み込みエラーではなく、読み込み後に本文を確かめる処理の結果です。例外tracebackやファイル内容は表示しません。引数`--file`を付け忘れたときは、argparseが使い方を案内します。
 
 ## L05: 入力条件を変更し、テストで確かめる
 
-ここでは、短すぎるメモをBedrockへ送る前に止める動作を確かめます。確認するのは要約の品質ではなく、本文の長さを調べる入力チェックです。アプリ全体では、`s07_l02.py` がファイルを読み、`s07_app.py` の `validate_input` が本文を整え、長さを確認してから `summarize_text` がBedrockへ渡します。今回はそのうち、`validate_input` にある最小文字数の条件を変更します。
+この演習では、利用者に必要な本文まで短さだけで拒否しないよう、任意の最小文字数条件を取り除きます。空白を除いて1文字以上なら入力として受け付け、空または空白だけは `EmptyInputError`、12,000文字を超える本文は `InputTooLongError` にします。12,000文字はこのアプリが長大な入力を避けるために設けた上限です。AWSやモデルの上限を示す値ではなく、利用料金の上限を保証するものでもありません。
 
-最初の配布状態では `MIN_INPUT_CHARACTERS` とテストの期待値が20で、Section 07の17件すべてが通ります。まず `sections/s07` で次のコマンドを実行し、初期状態を確かめてください。これは最初から失敗するテストを配る演習ではありません。境界テストは20文字を受け入れ、21文字も受け入れ、19文字では `InputTooShortError` になることを確認します。
+アプリ全体では、`s07_l02.py` がファイルを読み、`s07_app.py` の `validate_input` が前後の空白を除いて入力を確かめ、`summarize_text` がBedrockへ渡します。`validate_input` が数えるのは前後の空白を除いた後のPython文字列の文字数です。たとえば `"  x  "` は1文字として扱い、返り値も `"x"` です。空白だけなら空入力として扱います。
+
+### 演習の開始用コード
+
+開始用コードは、同じGit commit `a98160ae1889986893cf3da1a22d4019f50b0ff7` にある次の3ファイルです。既に用意している作業用リポジトリへ、この3ファイルだけを同じpathに保存し、ほかのSectionや設定fileは置き換えずに演習します。開始用コードでは最小20文字の条件があり、1文字の本文を渡すと `InputTooShortError` で拒否されます。
+
+- [開始用 s07_app.py（commit a98160a）](https://raw.githubusercontent.com/toma1110/python-generative-ai-app-development-amazon-bedrock/a98160ae1889986893cf3da1a22d4019f50b0ff7/sections/s07/s07_app.py)
+- [開始用 tests/test_s07.py（commit a98160a）](https://raw.githubusercontent.com/toma1110/python-generative-ai-app-development-amazon-bedrock/a98160ae1889986893cf3da1a22d4019f50b0ff7/sections/s07/tests/test_s07.py)
+- [開始用 s07_l04.py（commit a98160a）](https://raw.githubusercontent.com/toma1110/python-generative-ai-app-development-amazon-bedrock/a98160ae1889986893cf3da1a22d4019f50b0ff7/sections/s07/s07_l04.py)
+
+完成例は、このREADMEと同じ現在のSection 07にある3ファイルです。演習では別の解答用ファイルを作らず、固定した開始用コードからアプリ、テスト、CLIの入力案内を一緒に更新します。テストコマンドは `sections/s07` ディレクトリーを現在の場所として実行します。
+
+`FileInputTests` は `unittest.TestCase` を継承して作ったテスト用のクラスです。`TestCase` が `assertEqual` や `assertRaises` などの確認用メソッドを用意するため、各テストの期待値と実際の結果を比べられます。各 `test_` メソッドの `self` は、そのテストを実行している `FileInputTests` のオブジェクトを指します。
+
+固定した開始用3ファイルを次のように更新します。`s07_app.py` では `MIN_INPUT_CHARACTERS`、`InputTooShortError` class、短い入力を拒否する分岐を削除します。`tests/test_s07.py` では `InputTooShortError` のimport、最小文字数の期待値、短い入力の拒否テストを削除し、前後の空白を除いた1文字を受け付けるテストを追加します。さらに上限の直前・上限ちょうど・上限超過の期待値を置きます。テスト側は実装定数を読み取らず、仕様上の境界を独立して持ちます。`s07_l04.py` では同じclassのimportと `except InputTooShortError` 節を削除し、argparseの説明を「入力条件とファイル読み込み失敗」に更新します。これら3ファイルを同時に変更することで、CLIのimportを壊さず、最小文字数がなくなった後の受け入れ結果を確認できます。
+
+`sections/s07` から個別に次を実行し、短い入力と上限境界を確かめます。
 
 ```text
+uv run python -m unittest tests.test_s07.FileInputTests.test_accepts_one_character_after_trimming -v
+uv run python -m unittest tests.test_s07.FileInputTests.test_accepts_input_below_the_maximum_length -v
+uv run python -m unittest tests.test_s07.FileInputTests.test_accepts_input_at_the_maximum_length -v
+uv run python -m unittest tests.test_s07.FileInputTests.test_rejects_input_above_the_exercise_limit -v
 uv run python -m unittest discover -s tests -v
 ```
 
-この課題では別の解答用ファイルを使わず、実行対象のアプリとテストを編集します。リポジトリ最上位から開くファイルは `sections/s07/s07_app.py` と `sections/s07/tests/test_s07.py` です。テストコマンドは `sections/s07` ディレクトリーを現在の場所として実行します。
+期待する結果は、前後の空白を除いた1文字、11,999文字、12,000文字が受理され、12,001文字が拒否されることです。空白だけの入力は別の `EmptyInputError` となります。変更した条件と、正常・異常の境界テストがそれぞれ何を確かめるか対応づけてください。テストが失敗した場合は、表示された期待値と実際の値を比べ、実装または期待値のどちらに変更漏れがあるか調べます。
 
-`FileInputTests` は `unittest.TestCase` を継承して作ったテスト用のクラスです。`TestCase` がテスト実行に必要な機能や `assertEqual`、`assertRaises` などの確認用メソッドを用意するため、テストごとの判定処理を自分で作らずに使えます。各 `test_` メソッドの `self` は、そのテストを実行している `FileInputTests` のオブジェクトを指します。そのため `self.assertEqual(...)` はそのテストの期待値と実際の値を比べ、`self.assertRaises(...)` はそのテストで指定した例外が起きるかを確かめます。
+このユニットテストで確認するのは、ローカルのファイル読み込み、入力検査、アプリがモデルclientへ渡すリクエストと応答の受け渡しです。通常のプログラムテストは関数の戻り値、例外、CLIの終了結果など、コードに書かれた動作を確かめます。要約内容が原文に忠実か、変更で品質が改善したかは確かめません。品質は原文と出力を照合して人が評価します。指示や出力形式などを変更した効果を評価する場合は、同じ評価用入力で変更前後を比べ、問題が減ったか、別の問題が生じなかったかを見て、採用・追加修正・保留を判断します。一度よい出力が出ても品質が保証されたとは扱いません。たとえば「DB接続待ちが発生した」という原文を、要約が「障害の原因はDBだった」と断定するケースは説明用の例です。実際に観測したモデル出力ではありません。S08では出力の問題を見つけ、変更し、同じ事例で比べて判断する流れを扱います。
 
-短いメモだけでは要約の材料が足りないケースを避けるため、まず `sections/s07/s07_app.py` の `MIN_INPUT_CHARACTERS` を20から40へ変更します。テストの期待値はまだ20のままにして、`sections/s07` から次の2件を実行してください。どちらも20/21文字を受け入れる旧仕様のテストなので、新しい40文字条件を実装した時点では失敗します。この結果を見て、実装とテストが別々の役割を持つことを確認します。
+ファイル読み込みテストは一時ファイルを作ってパスを `read_text_file` へ渡し、戻り値や例外を確認します。ファイルがない、空白だけ、UTF-8で読めない場合は、ファイル読み込みと入力確認の結果を区別します。`read_text_file` はローカルファイルだけを扱い、Bedrock clientを受け取りません。
 
-```text
-uv run python -m unittest tests.test_s07.FileInputTests.test_accepts_input_at_the_minimum_length -v
-uv run python -m unittest tests.test_s07.FileInputTests.test_accepts_input_above_the_minimum_length -v
-```
-
-次に `sections/s07/tests/test_s07.py` の `EXPECTED_MINIMUM_LENGTH` を20から40へ変更します。テスト側は実装定数を読み取らず期待条件を独立して持つため、実装だけを変えた場合に旧条件を見逃しません。実装と期待仕様の両方を変更した後、次の3つの境界テストを個別に実行してからSectionの全17件を実行します。
-
-```text
-uv run python -m unittest tests.test_s07.FileInputTests.test_accepts_input_at_the_minimum_length -v
-uv run python -m unittest tests.test_s07.FileInputTests.test_accepts_input_above_the_minimum_length -v
-uv run python -m unittest tests.test_s07.FileInputTests.test_rejects_input_below_the_minimum_length -v
-uv run python -m unittest discover -s tests -v
-```
-
-変更後は40文字と41文字の本文が受け入れられ、39文字では `InputTooShortError` になることを確認します。`test_too_short_input_does_not_call_the_model` は、短すぎる本文がBedrock呼び出し前に拒否され、clientの呼び出し回数が0回であることも確かめます。L04の `test_l04_reports_short_input_without_traceback` は、39文字のファイルをCLIへ渡したとき利用者向け案内と終了コード2が返ることを確認します。変更した条件と正常・異常のテスト結果を対応づけて説明してください。テストが失敗したら、表示された期待値と実際の値を読み、コードまたはテストのどちらに変更漏れがあるか調べます。期待値をわざと誤らせて失敗を作る作業はしません。
-
-この長さの確認に必要なのはローカルの文字列とPythonだけです。本文をBedrockへ渡す前の条件なので、まずここを手元で繰り返し確認すれば、AWSの認証・通信やモデルの応答に左右されず、入力チェックを変更した効果が分かります。L02の実行は別の確認です。L02では実際にBedrockへ要約を依頼し、原文と応答を見比べます。このユニットテストだけではAWS接続やモデルの要約品質は確認しません。
-
-ファイル読み込みテストは、一時ファイルを作ってパスを `read_text_file` へ渡し、戻り値や例外を確認します。ファイルがない、空白だけ、UTF-8で読めない場合は、ファイル読み込みと入力確認のそれぞれの結果をテストします。`read_text_file` はローカルファイルだけを扱い、Bedrock clientを受け取りません。
-
-`FakeClient` を使うAPI境界のテストは、`summarize_text(client, text)` が本文・モデルID・出力上限を `client.converse` へ渡し、応答からテキストを取り出すことを確認します。FakeClientは渡された引数を記録し、決めておいた応答を返すテスト用の相手です。実際のAWS接続やモデル応答の正しさまでは確認しません。AWSへ接続して要約を得る動作はL02の実行で確かめ、要約の各文は原文と照合します。
+スタブとは、テスト時に外部サービスの代わりとなり、決められた応答を返すものです。このSectionの `FakeClient` は、その役割を持つ具体的な実装名です。本物のBedrockへ毎回接続せず、アプリのリクエストと応答処理を同じ条件で繰り返し確かめられます。FakeClientは受け取った引数を記録し、テストは入力本文、モデルID、system/userメッセージ、`maxTokens`、応答からのテキスト取り出しを確認します。指定した固定応答に応じた処理も確認します。現行テストはAWS接続・認証・サービスの実挙動やモデルの要約品質を確かめていません。未実装の異常応答ケースをテスト済みとは扱いません。本物のAWS接続はL02の実行で確かめ、要約の各文は原文と照合します。
 
 テストを実行します。
 
@@ -161,7 +161,7 @@ uv run python -m unittest discover -s tests -v
 uv run python -m unittest discover -s tests -v
 ```
 
-テストではUTF-8ファイルの読み込み、空入力、存在しないファイル、文字コードの誤り、Converseへ渡す入力と出力上限、応答の終了理由を確認します。ファイル処理だけのテストはAWSクライアントを作りません。Converseの形を確認するテストも、応答を返すモックを使いAWSへ接続しません。
+テストではUTF-8ファイル、空入力、存在しないファイル、文字コードの誤り、上限の境界、Converseへ渡す入力と出力上限、応答からテキストを取り出す処理、終了理由を確認します。ファイル処理だけのテストはAWSクライアントを作りません。Converseの形を確かめるテストはFakeClientを使うためAWSへ接続しません。
 
 ## 料金と権限
 
