@@ -1,4 +1,4 @@
-# Section 07: ローカルファイルを読む要約アプリ
+# 要約を引き継ぎ用ファイルへ保存する
 
 この演習では、架空の障害調査メモをUTF-8のテキストファイルから読み、Amazon Bedrock Converse APIで短く要約します。要約は調査結果の代わりにはなりません。実行後に必ず原文と照合し、記載された事実と不明な項目を確認します。
 
@@ -38,9 +38,9 @@ uv sync
 
 `uv sync`はこのSection専用の仮想環境へboto3を準備します。boto3は標準のAWS認証情報プロバイダーを使います。必要なら`BEDROCK_MODEL_ID`環境変数または`--model-id`で、利用可能な別モデルIDを指定できます。
 
-## L02: ファイルを読んで要約する
+## L02: ファイルを読み、要約を画面へ表示する流れを追う
 
-サンプルの調査メモを要約します。
+まず、サンプルの調査メモを要約して画面に表示します。
 
 ```text
 uv run python s07_l02.py --file data/investigation-notes.txt
@@ -56,122 +56,82 @@ uv run python s07_l02.py --file data/investigation-notes.txt
 4. `summarize_text` は入力をもう一度確認し、system指示と文字列を含むuserメッセージを作って `client.converse` を呼びます。
 5. `summarize_text` は応答dictの `stopReason` も確認します。`end_turn` なら最初の `text` blockを返し、`main` が画面へ表示します。`max_tokens` なら途中までの文を完成した要約として返さず、上限で終了した案内を表示します。通常完了でもtext blockがなければ、要約テキストがないことを表示します。
 
+### 要約を引き継ぎ用Markdownへ保存する
+
+画面の要約を別の担当者へ渡すときは、コピーして文書へ貼り直す代わりに `--output` を指定します。次の例は `sections/s07` から実行し、`report.md` を同じフォルダーへ作成します。
+
+```text
+uv run python s07_l02.py --file data/investigation-notes.txt --output report.md
+```
+
+保存先は現在の作業フォルダーを基準にします。保存先の親フォルダーは事前に作成してください。成功すると入力ファイル名と要約を含むUTF-8 Markdownが作られ、保存場所が表示されます。`report.md`を開き、ファイル名と要約があることを確認してください。要約は原文と照合して利用します。
+
+`--output`を省いた実行は、従来どおり要約を画面へ表示し、レポートファイルを作りません。指定した保存先が既にある場合は別の名前を選び、親フォルダーがない場合はそのフォルダーを作成するか保存先を変更してください。どちらもBedrockを呼び出す前に案内して終了します。既存ファイルを上書きしたり、フォルダーを自動作成したりしません。書き込みエラーが起きた場合は保存先のパス、空き容量、書き込み権限を確認してください。書き込み途中で失敗すると不完全なfileが残る場合があります。内容を確認し、この実行で作られたものと確認できた場合に限って個別に削除してください。再試行には別の未使用file名を指定します。どの失敗も成功とは表示せず、終了コードは0以外です。Bedrockの処理が失敗した場合、レポートは作成されません。
+
+同じ入力ファイルを保存先にも指定しないでください。入力を読み込んだ後、内容を壊さないよう保存先の検査と排他的な新規作成を行います。
+
 API呼び出しが成功して応答が返ったことと、回答が通常完了したことは別です。`stopReason`を確認するのは、途中までの文章を完成した要約として使わないためです。この演習では自動再試行や出力上限の自動変更はしません。
 
 system指示は日本語で100字程度の要約を求め、応答の最大長は512 tokensです。入力ファイルは12,000文字までです。別のファイルを使う場合も、Bedrockにはファイルの内容全体が送信されます。**この演習では公開済みの架空サンプルだけを使ってください。実データ、個人情報、認証情報、機密情報や業務データを含むファイルは指定しないでください。**
 
-出力が表示されたら、`data/investigation-notes.txt`を開き、要約の各文が原文のどこにあるか確認します。とくに、原因、影響範囲、復旧状況を原文以上に断定していないかを確認してください。モデルの文章は実行ごとに異なります。原文にない内容があれば、そのまま結論として使わず、原文を根拠に判断します。
+出力が表示された場合もファイルへ保存した場合も、`data/investigation-notes.txt`を開き、要約の各文が原文のどこにあるか確認します。とくに、原因、影響範囲、復旧状況を原文以上に断定していないかを確認してください。モデルの文章は実行ごとに異なります。原文にない内容があれば、そのまま結論として使わず、原文を根拠に判断します。
 
-## L04: 入力不足とファイルエラーを区別する
+## L04: 保存の仕様と編集するコードを決める
 
-一意な一時ディレクトリの中に、まだ存在しないファイル名を作って指定します。これにより、同名の既存ファイルを誤って使いません。
+画面に表示された要約を引き継ぐには、ファイルへ保存できる必要があります。実装前に、保存先・保存内容・保存を指定しない場合・失敗時の扱いを決めます。
 
-Windows PowerShell:
+このSectionの受入条件は次のとおりです。
 
-```powershell
-$missingDir = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
-New-Item -ItemType Directory -Path $missingDir | Out-Null
-$missingFile = Join-Path $missingDir "not-found.txt"
-try {
-    uv run python s07_l04.py --file $missingFile
-} finally {
-    Remove-Item -LiteralPath $missingDir -Recurse -Force
-}
-```
+- `--output report.md` を指定すると、入力ファイル名と要約をUTF-8 Markdownへ保存する
+- `--output`を省くと、今までどおり画面へ表示し、ファイルを作らない
+- 既にある保存先、ない親フォルダー、入力ファイルと同じ保存先、書き込み失敗では非0で終了し、成功したと案内しない
+- 既存ファイルを上書きせず、親フォルダーを自動作成しない
 
-この例はファイルを作らず、GUIDで作った専用ディレクトリだけを削除します。
+実装箇所は `s07_l02.py` の `--output` 引数と処理分岐、`s07_app.py` の保存先確認とMarkdown保存関数、`tests/test_s07.py` の正常系・失敗系テストです。ここでは受入条件と編集箇所を決め、実際の変更とテストはL05で行います。
 
-macOS / Linux:
+## L05: 保存機能を実装し、テストで確かめる
 
-```sh
-(
-  missing_dir=$(mktemp -d)
-  trap 'rmdir -- "$missing_dir"' EXIT
-  uv run python s07_l04.py --file "$missing_dir/not-found.txt"
-)
-```
+この演習では、画面に表示していた要約を引き継ぎ用Markdownへ保存できるようにします。開始用コードは外部repositoryのbaseline commit `3fdba894161c95f90ee85d3ec0efd816cdc73594` にある次の3ファイルです。既に用意している作業用リポジトリへ同じpathで保存し、ほかのSectionや設定fileを置き換えないでください。
 
-ファイルがないという案内が表示されます。次に、システムが一意な一時ファイルを作り、そのファイルだけを使って内容不足を確認します。既存ファイルは変更しません。
+- [開始用 s07_l02.py（baseline 3fdba89）](https://raw.githubusercontent.com/toma1110/python-generative-ai-app-development-amazon-bedrock/3fdba894161c95f90ee85d3ec0efd816cdc73594/sections/s07/s07_l02.py)
+- [開始用 s07_app.py（baseline 3fdba89）](https://raw.githubusercontent.com/toma1110/python-generative-ai-app-development-amazon-bedrock/3fdba894161c95f90ee85d3ec0efd816cdc73594/sections/s07/s07_app.py)
+- [開始用 tests/test_s07.py（baseline 3fdba89）](https://raw.githubusercontent.com/toma1110/python-generative-ai-app-development-amazon-bedrock/3fdba894161c95f90ee85d3ec0efd816cdc73594/sections/s07/tests/test_s07.py)
 
-Windows PowerShell:
+まず `s07_l02.py` に任意の `--output` を追加します。保存先が既にある、親フォルダーがない、入力ファイルと同じ場所を指定した場合はBedrockを呼び出す前に終了します。`s07_app.py` には保存先確認と、入力ファイルのbasename・要約・原文との照合案内をUTF-8 Markdownへ書く `save_summary` を用意します。排他的な新規作成で既存fileを上書きしません。要約の取得に成功した後で保存し、`--output`を省いたときは従来どおり画面へ表示します。APIや書き込みが失敗した場合は非0で終了し、保存成功を案内しません。
 
-```powershell
-$emptyFile = New-TemporaryFile
-try {
-    uv run python s07_l04.py --file $emptyFile.FullName
-} finally {
-    Remove-Item -LiteralPath $emptyFile.FullName
-}
-```
+テストは `FakeClient` を使い、Bedrockへ接続しません。保存した本文の文字コードと構成、画面表示の従来動作、既存保存先・入力との衝突・親フォルダーなしではclientを作らないこと、API失敗時にfileを作らないこと、書き込み失敗を成功扱いしないことを確かめます。書き込み途中の失敗で部分fileが残るケースも確認します。追加した9テストと、既存18テストを実行します。
 
-macOS / Linux:
-
-```sh
-(
-  temp_dir=$(mktemp -d)
-  trap 'rm -f -- "$temp_dir/empty.txt"; rmdir -- "$temp_dir"' EXIT
-  : > "$temp_dir/empty.txt"
-  uv run python s07_l04.py --file "$temp_dir/empty.txt"
-)
-```
-
-空のファイルでは内容が空という案内になります。文字コードがUTF-8でない場合、フォルダーを指定した場合、読み取り権限がない場合も、それぞれ利用者が次に確認する内容を表示します。ファイルを読めた後、本文が空白だけなら内容が空という案内になります。これはファイルの読み込みエラーではなく、読み込み後に本文を確かめる処理の結果です。例外tracebackやファイル内容は表示しません。引数`--file`を付け忘れたときは、argparseが使い方を案内します。
-
-## L05: 入力条件を変更し、テストで確かめる
-
-この演習では、利用者に必要な本文まで短さだけで拒否しないよう、任意の最小文字数条件を取り除きます。空白を除いて1文字以上なら入力として受け付け、空または空白だけは `EmptyInputError`、12,000文字を超える本文は `InputTooLongError` にします。12,000文字はこのアプリが長大な入力を避けるために設けた上限です。AWSやモデルの上限を示す値ではなく、利用料金の上限を保証するものでもありません。
-
-アプリ全体では、`s07_l02.py` がファイルを読み、`s07_app.py` の `validate_input` が前後の空白を除いて入力を確かめ、`summarize_text` がBedrockへ渡します。`validate_input` が数えるのは前後の空白を除いた後のPython文字列の文字数です。たとえば `"  x  "` は1文字として扱い、返り値も `"x"` です。空白だけなら空入力として扱います。
-
-### 演習の開始用コード
-
-開始用コードは、同じGit commit `a98160ae1889986893cf3da1a22d4019f50b0ff7` にある次の3ファイルです。既に用意している作業用リポジトリへ、この3ファイルだけを同じpathに保存し、ほかのSectionや設定fileは置き換えずに演習します。開始用コードでは最小20文字の条件があり、1文字の本文を渡すと `InputTooShortError` で拒否されます。
-
-- [開始用 s07_app.py（commit a98160a）](https://raw.githubusercontent.com/toma1110/python-generative-ai-app-development-amazon-bedrock/a98160ae1889986893cf3da1a22d4019f50b0ff7/sections/s07/s07_app.py)
-- [開始用 tests/test_s07.py（commit a98160a）](https://raw.githubusercontent.com/toma1110/python-generative-ai-app-development-amazon-bedrock/a98160ae1889986893cf3da1a22d4019f50b0ff7/sections/s07/tests/test_s07.py)
-- [開始用 s07_l04.py（commit a98160a）](https://raw.githubusercontent.com/toma1110/python-generative-ai-app-development-amazon-bedrock/a98160ae1889986893cf3da1a22d4019f50b0ff7/sections/s07/s07_l04.py)
-
-完成例は、このREADMEと同じ現在のSection 07にある3ファイルです。演習では別の解答用ファイルを作らず、固定した開始用コードからアプリ、テスト、CLIの入力案内を一緒に更新します。テストコマンドは `sections/s07` ディレクトリーを現在の場所として実行します。
-
-`FileInputTests` は `unittest.TestCase` を継承して作ったテスト用のクラスです。`TestCase` が `assertEqual` や `assertRaises` などの確認用メソッドを用意するため、各テストの期待値と実際の結果を比べられます。各 `test_` メソッドの `self` は、そのテストを実行している `FileInputTests` のオブジェクトを指します。
-
-固定した開始用3ファイルを次のように更新します。`s07_app.py` では `MIN_INPUT_CHARACTERS`、`InputTooShortError` class、短い入力を拒否する分岐を削除します。`tests/test_s07.py` では `InputTooShortError` のimport、最小文字数の期待値、短い入力の拒否テストを削除し、前後の空白を除いた1文字を受け付けるテストを追加します。さらに上限の直前・上限ちょうど・上限超過の期待値を置きます。テスト側は実装定数を読み取らず、仕様上の境界を独立して持ちます。`s07_l04.py` では同じclassのimportと `except InputTooShortError` 節を削除し、argparseの説明を「入力条件とファイル読み込み失敗」に更新します。これら3ファイルを同時に変更することで、CLIのimportを壊さず、最小文字数がなくなった後の受け入れ結果を確認できます。
-
-`sections/s07` から個別に次を実行し、短い入力と上限境界を確かめます。
-
-```text
-uv run python -m unittest tests.test_s07.FileInputTests.test_accepts_one_character_after_trimming -v
-uv run python -m unittest tests.test_s07.FileInputTests.test_accepts_input_below_the_maximum_length -v
-uv run python -m unittest tests.test_s07.FileInputTests.test_accepts_input_at_the_maximum_length -v
-uv run python -m unittest tests.test_s07.FileInputTests.test_rejects_input_above_the_exercise_limit -v
-uv run python -m unittest discover -s tests -v
-```
-
-期待する結果は、前後の空白を除いた1文字、11,999文字、12,000文字が受理され、12,001文字が拒否されることです。空白だけの入力は別の `EmptyInputError` となります。変更した条件と、正常・異常の境界テストがそれぞれ何を確かめるか対応づけてください。テストが失敗した場合は、表示された期待値と実際の値を比べ、実装または期待値のどちらに変更漏れがあるか調べます。
-
-このユニットテストで確認するのは、ローカルのファイル読み込み、入力検査、アプリがモデルclientへ渡すリクエストと応答の受け渡しです。通常のプログラムテストは関数の戻り値、例外、CLIの終了結果など、コードに書かれた動作を確かめます。要約内容が原文に忠実か、変更で品質が改善したかは確かめません。品質は原文と出力を照合して人が評価します。指示や出力形式などを変更した効果を評価する場合は、同じ評価用入力で変更前後を比べ、問題が減ったか、別の問題が生じなかったかを見て、採用・追加修正・保留を判断します。一度よい出力が出ても品質が保証されたとは扱いません。たとえば「DB接続待ちが発生した」という原文を、要約が「障害の原因はDBだった」と断定するケースは説明用の例です。実際に観測したモデル出力ではありません。S08では出力の問題を見つけ、変更し、同じ事例で比べて判断する流れを扱います。
-
-ファイル読み込みテストは一時ファイルを作ってパスを `read_text_file` へ渡し、戻り値や例外を確認します。ファイルがない、空白だけ、UTF-8で読めない場合は、ファイル読み込みと入力確認の結果を区別します。`read_text_file` はローカルファイルだけを扱い、Bedrock clientを受け取りません。
-
-スタブとは、テスト時に外部サービスの代わりとなり、決められた応答を返すものです。このSectionの `FakeClient` は、その役割を持つ具体的な実装名です。本物のBedrockへ毎回接続せず、アプリのリクエストと応答処理を同じ条件で繰り返し確かめられます。FakeClientは受け取った引数を記録し、テストは入力本文、モデルID、system/userメッセージ、`maxTokens`、応答からのテキスト取り出しを確認します。指定した固定応答に応じた処理も確認します。現行テストはAWS接続・認証・サービスの実挙動やモデルの要約品質を確かめていません。未実装の異常応答ケースをテスト済みとは扱いません。本物のAWS接続はL02の実行で確かめ、要約の各文は原文と照合します。
-
-テストを実行します。
+`sections/s07` から次を実行してください。
 
 ```text
 uv run python -m unittest discover -s tests -v
 ```
 
-テストではUTF-8ファイル、空入力、存在しないファイル、文字コードの誤り、上限の境界、Converseへ渡す入力と出力上限、応答からテキストを取り出す処理、終了理由を確認します。ファイル処理だけのテストはAWSクライアントを作りません。Converseの形を確かめるテストはFakeClientを使うためAWSへ接続しません。
+27件すべてが成功したら、L02の保存コマンドを実行して `report.md` を開き、入力ファイル名と今回の要約があることを確認します。FakeClientやunit testが確かめるのは保存処理やコードの動作です。固定応答を保存できても、要約が原文に忠実だとは分かりません。実際の要約を利用する場合は、原文と照合して事実と不明な項目を確認します。出力の内容評価と改善はS08で扱います。
 
+### FakeClientとテストで確かめる範囲
+
+スタブはテスト時に外部サービスの代わりとなり、決められた応答を返します。このSectionの `FakeClient` はその実装名です。新しい9テストは、UTF-8 Markdownへの保存、既定の画面表示、既存保存先・入力との衝突・親フォルダーなしでの事前終了、API失敗時に保存しないこと、書き込み失敗時の非0終了と成功案内の抑止、部分fileが残ることを確認します。既存の18テストはファイル読み込み・入力条件、Converseへ渡す内容、応答テキストと終了理由を確認します。
+
+通常のunit testが確かめるのは戻り値、例外、CLIの終了結果など、コードに書かれた動作です。FakeClientの固定応答を保存できても、その文章が原文に忠実だとは分かりません。要約の各文を原文と照合し、事実と不明な項目を見分ける内容評価はS08で扱います。参考例として「DB接続待ちが発生した」という原文を要約が「原因はDBだった」と断定するケースを考えられますが、これは説明用であり、実行で観測した出力ではありません。
 ## 料金と権限
 
 L02の有効な実行では、Bedrock Runtimeへ1回リクエストします。課金はモデル、リージョン、入力・出力tokensなどで変わります。短い教材用ファイルを使い、実行前に[Amazon Bedrock料金表](https://aws.amazon.com/bedrock/pricing/)で対象モデルとリージョンの料金を確認してください。出力tokensには上限を設定していますが、実際の料金は利用状況によって異なります。
 
-L04とL05はローカル処理だけでAWSへ接続しません。このSectionはAWS resourceを作りません。権限は対象モデルへの`bedrock:InvokeModel`に限定し、利用モデルとリージョンは自分のAWS環境で利用可能なものを選びます。
+L04の仕様確認と、L05のunit testはローカルで動き、AWSへ接続しません。L02で実際に要約する場合はBedrock Runtimeへ接続しますが、`--output`は同じ要約結果を保存するだけで追加のAPI呼び出しをしません。このSectionはAWS resourceを作りません。権限は対象モデルへの`bedrock:InvokeModel`に限定し、利用モデルとリージョンは自分のAWS環境で利用可能なものを選びます。
 
 ## 後片付け
 
-このSectionはAWS resourceやクラウド上のファイルを作成しません。演習後に仮想環境を削除する場合は、Section 07のディレクトリーからリポジトリ最上位へ戻り、`.venv`だけを削除します。
+このSectionはAWS resourceやクラウド上のファイルを作成しません。L02で自分が作成した `sections/s07/report.md` を削除する場合は、そのfileが今回の演習で作ったものだと確認してから、Section 07のディレクトリーで次を実行します。指定したfileだけを削除します。保存先に別の名前を使った場合は、その自分が作成したfileを確認して個別に削除してください。
+
+Windows PowerShell:
+
+```powershell
+if (Test-Path -LiteralPath .\report.md) { Remove-Item -LiteralPath .\report.md }
+Test-Path -LiteralPath .\report.md
+```
+
+`False`なら `report.md` はありません。続けて仮想環境を削除する場合は、Section 07のディレクトリーからリポジトリ最上位へ戻り、`.venv`だけを削除します。
 
 Windows PowerShell:
 
@@ -184,6 +144,13 @@ Test-Path -LiteralPath .\sections\s07\.venv
 結果が`False`なら削除できています。
 
 macOS / Linux:
+
+```sh
+if [ -f report.md ]; then rm -- report.md; fi
+test ! -e report.md && echo "report.mdはありません"
+```
+
+続けて仮想環境を削除する場合は、Section 07のディレクトリーからリポジトリ最上位へ戻ります。
 
 ```sh
 cd ../..

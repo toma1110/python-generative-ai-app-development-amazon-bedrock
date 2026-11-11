@@ -25,6 +25,39 @@ class IncompleteResponseError(ValueError):
     """Raised when Converse returned without completing a normal answer."""
 
 
+class OutputFileError(ValueError):
+    """Raised when a summary report cannot safely be written."""
+
+
+def validate_output_path(input_path, output_path):
+    """Reject unsafe output targets before creating a model client."""
+    source = Path(input_path)
+    target = Path(output_path)
+    if target.exists():
+        raise OutputFileError("保存先が既にあります。別のファイル名を指定してください。")
+    if not target.parent.is_dir():
+        raise OutputFileError("保存先のフォルダーがありません。先にフォルダーを作成してください。")
+    try:
+        if source.samefile(target):
+            raise OutputFileError("入力ファイルと同じ場所には保存できません。別の保存先を指定してください。")
+    except FileNotFoundError:
+        pass
+    return target
+
+
+def save_summary(input_path, output_path, summary):
+    """Create a UTF-8 Markdown report without replacing an existing file."""
+    target = validate_output_path(input_path, output_path)
+    report = (
+        f"# 要約: {Path(input_path).name}\n\n"
+        f"{summary}\n\n"
+        "> 要約は原文と照合して利用してください。\n"
+    )
+    with target.open("x", encoding="utf-8", newline="\n") as output_file:
+        output_file.write(report)
+    return target
+
+
 def validate_input(text):
     """Return trimmed input text or raise a clear error for unusable content."""
     if not isinstance(text, str) or not text.strip():

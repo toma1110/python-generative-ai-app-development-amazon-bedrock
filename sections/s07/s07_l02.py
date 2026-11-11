@@ -5,12 +5,22 @@ import sys
 
 from botocore.exceptions import BotoCoreError, ClientError
 
-from s07_app import IncompleteResponseError, configured_model_id, create_client, read_text_file, summarize_text
+from s07_app import (
+    IncompleteResponseError,
+    OutputFileError,
+    configured_model_id,
+    create_client,
+    read_text_file,
+    save_summary,
+    summarize_text,
+    validate_output_path,
+)
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="ローカルの調査メモをBedrockで要約します")
     parser.add_argument("--file", required=True, help="UTF-8のテキストファイル")
+    parser.add_argument("--output", default=None, help="要約を保存するMarkdownファイル")
     parser.add_argument("--model-id", default=None, help="利用可能なBedrockモデルID")
     args = parser.parse_args(argv)
 
@@ -32,6 +42,13 @@ def main(argv=None):
         print(str(error), file=sys.stderr)
         return 2
 
+    if args.output:
+        try:
+            validate_output_path(args.file, args.output)
+        except OutputFileError as error:
+            print(str(error), file=sys.stderr)
+            return 2
+
     try:
         answer = summarize_text(create_client(), source, args.model_id or configured_model_id())
     except ClientError as error:
@@ -48,8 +65,24 @@ def main(argv=None):
         print(str(error), file=sys.stderr)
         return 1
 
-    print("要約（原文と照合して利用してください）:")
-    print(answer)
+    if args.output:
+        try:
+            saved_path = save_summary(args.file, args.output, answer)
+        except (OutputFileError, OSError) as error:
+            if isinstance(error, OutputFileError):
+                message = str(error)
+            else:
+                message = (
+                    "保存先へ書き込めません。保存先のパス、空き容量、書き込み権限を確認してください。"
+                    "不完全なファイルが残っている場合があります。内容を確認し、再試行する場合は別のファイル名を指定してください。"
+                    f" ({error})"
+                )
+            print(message, file=sys.stderr)
+            return 1
+        print(f"要約を保存しました: {saved_path}")
+    else:
+        print("要約（原文と照合して利用してください）:")
+        print(answer)
     return 0
 
 

@@ -4,7 +4,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 
-from s07_app import EmptyInputError, IncompleteResponseError, InputTooLongError, read_text_file, summarize_text, validate_input
+from s07_app import EmptyInputError, IncompleteResponseError, InputTooLongError, read_text_file, save_summary, summarize_text, validate_input
 from s07_l02 import main as l02_main
 from s07_l04 import main as l04_main
 
@@ -26,6 +26,184 @@ class FakeClient:
 
 
 class FileInputTests(unittest.TestCase):
+    def test_save_summary_writes_utf8_markdown_with_input_basename(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "調査メモ.txt"
+            source.write_text(TEST_INPUT, encoding="utf-8")
+            output = Path(directory) / "report.md"
+
+            saved = save_summary(source, output, "確認できた事実の要約です。")
+
+            self.assertEqual(saved, output)
+            self.assertEqual(
+                output.read_bytes().decode("utf-8"),
+                "# 要約: 調査メモ.txt\n\n確認できた事実の要約です。\n\n> 要約は原文と照合して利用してください。\n",
+            )
+
+    def test_save_summary_does_not_replace_existing_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "memo.txt"
+            output = Path(directory) / "report.md"
+            source.write_text(TEST_INPUT, encoding="utf-8")
+            output.write_text("keep", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "既にあります"):
+                save_summary(source, output, "new")
+
+            self.assertEqual(output.read_text(encoding="utf-8"), "keep")
+
+    def test_l02_saves_fake_summary_and_default_mode_keeps_stdout(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "memo.txt"
+            output = Path(directory) / "report.md"
+            source.write_text(TEST_INPUT, encoding="utf-8")
+            fake = FakeClient()
+            stdout = StringIO()
+            from unittest.mock import patch
+
+            with patch("s07_l02.create_client", return_value=fake), redirect_stdout(stdout):
+                result = l02_main(["--file", str(source), "--output", str(output)])
+
+            self.assertEqual(result, 0)
+            self.assertEqual(len(fake.calls), 1)
+            self.assertIn("# 要約: memo.txt", output.read_text(encoding="utf-8"))
+            self.assertIn("要約を保存しました", stdout.getvalue())
+
+            stdout = StringIO()
+            with patch("s07_l02.create_client", return_value=FakeClient()), redirect_stdout(stdout):
+                result = l02_main(["--file", str(source)])
+
+            self.assertEqual(result, 0)
+            self.assertIn("要約（原文と照合して利用してください）:", stdout.getvalue())
+            self.assertIn("確認できた事実の要約です。", stdout.getvalue())
+
+    def test_known_invalid_output_stops_before_client_creation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "memo.txt"
+            output = Path(directory) / "existing.md"
+            source.write_text(TEST_INPUT, encoding="utf-8")
+            output.write_text("keep", encoding="utf-8")
+            error_output = StringIO()
+            from unittest.mock import patch
+
+            with patch("s07_l02.create_client") as create_client, redirect_stderr(error_output):
+                result = l02_main(["--file", str(source), "--output", str(output)])
+
+            self.assertEqual(result, 2)
+            self.assertIn("既にあります", error_output.getvalue())
+            create_client.assert_not_called()
+            self.assertEqual(output.read_text(encoding="utf-8"), "keep")
+
+    def test_input_file_cannot_be_used_as_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "memo.txt"
+            source.write_text(TEST_INPUT, encoding="utf-8")
+            error_output = StringIO()
+            from unittest.mock import patch
+
+            with patch("s07_l02.create_client") as create_client, redirect_stderr(error_output):
+                result = l02_main(["--file", str(source), "--output", str(source)])
+
+            self.assertEqual(result, 2)
+            self.assertIn("既にあります", error_output.getvalue())
+            create_client.assert_not_called()
+            self.assertEqual(source.read_text(encoding="utf-8"), TEST_INPUT)
+
+    def test_missing_output_parent_stops_before_client_creation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "memo.txt"
+            source.write_text(TEST_INPUT, encoding="utf-8")
+            output = Path(directory) / "missing" / "report.md"
+            error_output = StringIO()
+            from unittest.mock import patch
+
+            with patch("s07_l02.create_client") as create_client, redirect_stderr(error_output):
+                result = l02_main(["--file", str(source), "--output", str(output)])
+
+            self.assertEqual(result, 2)
+            self.assertIn("フォルダーがありません", error_output.getvalue())
+            create_client.assert_not_called()
+            self.assertFalse(output.parent.exists())
+
+    def test_api_failure_does_not_create_report(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "memo.txt"
+            output = Path(directory) / "report.md"
+            source.write_text(TEST_INPUT, encoding="utf-8")
+            fake = FakeClient({"stopReason": "max_tokens", "output": {"message": {"content": [{"text": "途中"}]}}})
+            error_output = StringIO()
+            from unittest.mock import patch
+
+            with patch("s07_l02.create_client", return_value=fake), redirect_stderr(error_output):
+                result = l02_main(["--file", str(source), "--output", str(output)])
+
+            self.assertEqual(result, 1)
+            self.assertIn("途中終了", error_output.getvalue())
+            self.assertFalse(output.exists())
+
+    def test_write_failure_is_reported_without_success_message(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "memo.txt"
+            output = Path(directory) / "report.md"
+            source.write_text(TEST_INPUT, encoding="utf-8")
+            fake = FakeClient()
+            error_output = StringIO()
+            stdout = StringIO()
+            from unittest.mock import patch
+
+            with patch("s07_l02.create_client", return_value=fake), patch("s07_l02.save_summary", side_effect=OSError("disk full")), redirect_stderr(error_output), redirect_stdout(stdout):
+                result = l02_main(["--file", str(source), "--output", str(output)])
+
+            self.assertEqual(result, 1)
+            self.assertIn("disk full", error_output.getvalue())
+            self.assertNotIn("保存しました", stdout.getvalue())
+            self.assertFalse(output.exists())
+
+    def test_partial_write_failure_is_reported_and_partial_file_is_preserved(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "memo.txt"
+            output = Path(directory) / "report.md"
+            source.write_text(TEST_INPUT, encoding="utf-8")
+            fake = FakeClient()
+            error_output = StringIO()
+            stdout = StringIO()
+            from unittest.mock import patch
+
+            original_open = Path.open
+
+            class PartialWriter:
+                def __init__(self, stream):
+                    self.stream = stream
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, exc_type, exc_value, traceback):
+                    self.stream.close()
+                    return False
+
+                def write(self, content):
+                    self.stream.write(content[:12])
+                    self.stream.flush()
+                    raise OSError("disk full")
+
+            def open_with_partial_failure(path, *args, **kwargs):
+                if path == output:
+                    return PartialWriter(original_open(path, *args, **kwargs))
+                return original_open(path, *args, **kwargs)
+
+            with patch("s07_l02.create_client", return_value=fake), patch.object(Path, "open", open_with_partial_failure), redirect_stderr(error_output), redirect_stdout(stdout):
+                result = l02_main(["--file", str(source), "--output", str(output)])
+
+            self.assertEqual(result, 1)
+            self.assertIn("disk full", error_output.getvalue())
+            self.assertIn("空き容量", error_output.getvalue())
+            self.assertIn("不完全なファイルが残っている場合", error_output.getvalue())
+            self.assertIn("別のファイル名", error_output.getvalue())
+            self.assertNotIn("保存しました", stdout.getvalue())
+            self.assertTrue(output.exists())
+            self.assertEqual(output.read_text(encoding="utf-8"), "# 要約: memo.t")
+
     def test_reads_utf8_text_and_trims_outer_whitespace(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "memo.txt"
