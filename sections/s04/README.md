@@ -1,160 +1,70 @@
-# Section 04: APIとAWS接続
+# 関数とモジュールで処理を再利用する
 
-このSectionでは、PythonアプリからAPIへ送る入力と応答を確認し、AWS認証情報とアプリ固有の秘密情報の違いを学びます。L02は[HTTPの要求と応答を確かめる教材](l02/README.md)で、ローカルAPIのGET・POST・JSONを扱います。L04では認証情報をコードへ書かずにAWSへ接続し、実行先のアカウントとリージョンを確かめます。
+このSectionでは、入力した値を関数へ渡し、処理結果を呼び出し元で受け取り、表示する流れを練習します。続けて、別のPythonファイルをモジュールとして読み込みます。実行にはPython 3.11以降を使います。外部ライブラリ、AWSアカウント、Bedrock接続は不要です。
 
-## L02: HTTPの要求と応答を確かめる
+コマンドは公開repositoryの最上位フォルダーで実行します。Section 2で作った仮想環境を有効にしている場合も、追加パッケージのインストールは必要ありません。Section 2の`requests`は、インストールして使う配布物の例でした。ここではPython標準の仕組みで、同じrepository内の`.py`ファイルをimportします。
 
-このローカル演習にはPython 3.11以降と`curl`が必要です。AWS CLI、AWSアカウント、uvの準備は不要です。手順は[L02 README](l02/README.md)を確認してください。
+## 関数の引数と戻り値を試す
 
-## L04の準備
-
-Course仕様に合わせ、L04は受講者のPC上でCLIまたはVS Codeから実行する手順を示します。PCでL04を実行する場合だけ、次のAWS接続設定を準備します。
-
-- Python 3.11以降
-- `uv`
-- AWS CLI v2
-- AWS IAM Identity Centerなどを使って設定済みのAWS CLIプロファイル
-- 選んだAWSアカウントで利用できる有効なログインセッション
-
-AWS CLIでまだプロファイルを設定していない場合は、組織のAWS管理者が案内する方法を使ってください。新しいアクセスキーを発行したり、ソースコードや`.env`ファイルに認証情報を保存したりしません。IAM Identity Centerのプロファイルを使う場合は、先にログインします。
+この演習では、関数の引数と戻り値を扱う[演習コード](l02/)を使います。コマンドはrepository最上位から実行します。
 
 ```text
-aws sso login --profile <profile-name>
+python sections/s04/l02/main.py
 ```
-
-`<profile-name>`は実際のプロファイル名に置き換えます。
-
-## L04: 認証情報をコードへ書かずに接続先を確認する
-
-リポジトリ最上位で、演習の依存関係を準備します。`uv sync`はこの演習の仮想環境へboto3をインストールします。
 
 ```text
-cd sections/s04/l04
-uv sync
+API応答: 確認済み
+エラーログ: 追加確認が必要
+再試行回数: 確認済み
 ```
 
-実行するシェルでプロファイルとリージョンを選びます。これらの環境変数は、コードを変えずに使うAWS設定を選ぶためのものです。認証情報そのものを環境変数へコピーする必要はありません。
+`sections/s04/l02/main.py`の`if check["status"] == "needs_review":`を、比較する値だけ`"ok"`へ変えて同じコマンドを実行すると、API応答と再試行回数が「追加確認が必要」、エラーログが「確認済み」と表示されます。変更後は`"needs_review"`へ戻してください。
 
-Windows PowerShell:
+## L03: importで自作モジュールの関数を呼び出す
 
-```powershell
-$env:AWS_PROFILE = "<profile-name>"
-$env:AWS_DEFAULT_REGION = "ap-northeast-1"
-uv run python main.py
+`sections/s04/l03/`には`main.py`と`check_data.py`があります。両方を同じフォルダーに置いた状態で、repository最上位から実行します。
+
+```text
+python sections/s04/l03/main.py
 ```
 
-macOS / Linux:
-
-```sh
-export AWS_PROFILE="<profile-name>"
-export AWS_DEFAULT_REGION="ap-northeast-1"
-uv run python main.py
+```text
+受け取った確認項目: 3件
+API応答: ok
+エラーログ: needs_review
+再試行回数: ok
 ```
 
-プロファイル名とリージョンは、自分が使うものに置き換えてください。`AWS_PROFILE`はAWS CLIとboto3が参照する名前付きプロファイルを選びます。`AWS_DEFAULT_REGION`はこのシェルで使うリージョンを指定します。リージョンを環境変数で指定しない場合、boto3は選択したプロファイルの共有AWS設定からリージョンを読み取ります。
+`from check_data import get_checks`は、同じフォルダーの`check_data.py`から`get_checks`という関数を読み込みます。`checks = get_checks()`で関数を呼ぶと、関数が返したlistを`checks`が受け取ります。forはlistの各dictを一件ずつ読み、呼び出し側で表示します。listの一つの表示値を変えるには`check_data.py`の該当する`status`を変更し、再実行して同じ項目の行を確認します。終了後は変更を元に戻します。
 
-プログラムはSTSの`GetCallerIdentity`を呼び、応答に含まれるAWS Account IDと、boto3セッションが選んだリージョンを表示します。Account IDが自分の想定したAWSアカウントと一致すること、リージョンが演習で使う予定のものと一致することを確認してください。ARNや認証情報は表示しません。違うアカウントが表示された場合は、そのまま次の演習へ進まず、プロファイルやシェルの設定を確認します。
+確認項目のlistが期待どおり返ることは、次のテストで確かめられます。
 
-実コードの各部分をPythonの基礎用語と対応させます。丸括弧`()`のある箇所はクラスやメソッドの呼び出しで、`session.region_name`は丸括弧なしの属性参照です。
-
-| コード | Pythonの要素 | このプログラムでの役割 |
-| --- | --- | --- |
-| `boto3.Session()` | クラスの呼び出し | `Session`クラスからSession objectを作り、変数`session`へ代入します。 |
-| `session.client("sts", region_name=region)` | メソッドの呼び出し | `session` objectの`client`メソッドがSTS client objectを返します。Sessionの認証情報と指定したリージョンを使います。 |
-| `session.region_name` | property（属性）の参照 | `session` objectから設定済みリージョンの値を読みます。ここでは括弧を付けて呼び出しません。 |
-| `sts_client.get_caller_identity()` | clientのメソッド呼び出し | STSの`GetCallerIdentity` APIを実行し、応答をPythonの辞書として受け取ります。 |
-| `response["Account"]` | 辞書のkey参照 | 応答辞書から`Account`の値（AWS Account ID）を取り出します。 |
-
-`client(...)`が作るのは、STS操作に使うclient objectです。この演習の`GetCallerIdentity`要求は、その後の`get_caller_identity()`で行います。今回のプログラムはAccount IDとリージョンだけを表示します。
-
-ここではS03で学んだ変数、関数、辞書を使っています。`main()`が`session`と`region`を変数に入れて`read_target()`へ渡し、関数がresponse辞書から`account_id`を取り出して返します。呼び出し元の`main()`は、その値と`region`を`print()`で表示します。Account IDはSTS応答の`Account`から、Regionはboto3 Sessionの設定から来ます。STS応答自体にRegionは含まれません。
-
-認証情報は「誰としてAWSへ接続するか」を示し、IAM権限は「そのIDで何を実行できるか」を制御します。アプリ固有の外部サービス用パスワードやAPIトークンは別の秘密情報です。必要なアプリではSecrets Managerなどへ保存し、AWSの認証情報でその値を取得する権限を管理します。この演習では秘密情報を作成・取得しません。
-
-## 実行結果と接続先の判断
-
-この演習ではAWSへ接続し、STSの応答からAccount IDを、boto3 Sessionの設定からRegionを表示します。成功時には自分が実行した本物の値が出ます。固定の成功出力例や架空のAccount IDは使いません。実行後、表示されたAccount IDが選んだAWSアカウントと一致すること、Regionが予定している `ap-northeast-1` であることを確認してください。一致しない場合は次へ進まず、プロファイルとシェルの設定を見直します。Account IDや認証情報を公開の投稿、画像、動画へ載せないでください。
-
-CloudShellはAWS Consoleから利用できるLinux shellですが、このCourseの実行環境は受講者のPC（CLI / VS Code）です。このREADMEにはCloudShellでのrepository取得、依存関係準備、演習directory、実行手順を示していないため、上記のPC向け手順をCloudShellへそのまま適用しないでください。
-
-この確認はAWSの読み取り専用APIを1回呼び出します。`GetCallerIdentity`にはIAM権限の追加が不要です。AWS resourceを作成・変更せず、Bedrockのモデルも呼び出しません。
-
-## 想定と異なる場合
-
-- 認証情報が見つからない、またはSSOセッションの期限切れ: 正しいプロファイルを指定し、必要なら`aws sso login --profile <profile-name>`を実行してから再実行します。
-- 想定と違うアカウントが表示される: `AWS_PROFILE`が選んだプロファイル名と、プロファイルを設定したAWSアカウントを確認します。表示された値を確認するまで次へ進みません。
-- プロファイルを指定したのに別の認証情報が使われる: `AWS_ACCESS_KEY_ID`、`AWS_SECRET_ACCESS_KEY`、`AWS_SESSION_TOKEN`の環境変数が設定されていると、プロファイルより優先される場合があります。値を表示せず、設定されている変数名だけを確認します。
-
-  Windows PowerShell:
-
-  ```powershell
-  Get-ChildItem Env: | Where-Object Name -In @("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN") | Select-Object -ExpandProperty Name
-  ```
-
-  macOS / Linux:
-
-  ```sh
-  for name in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN; do
-    if printenv "$name" > /dev/null; then printf '%s is set\n' "$name"; fi
-  done
-  ```
-
-  指定プロファイルを使う場合は、このターミナル内だけで意図しない環境変数を解除してから再実行します。値を表示したり、共有したりしないでください。
-
-  ```powershell
-  Remove-Item Env:AWS_ACCESS_KEY_ID, Env:AWS_SECRET_ACCESS_KEY, Env:AWS_SESSION_TOKEN -ErrorAction SilentlyContinue
-  ```
-
-  ```sh
-  unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
-  ```
-- リージョンが空、または想定と違う: シェルの`AWS_DEFAULT_REGION`と、プロファイルのリージョン設定を確認します。環境変数に設定がある場合はそちらを直します。
-- 接続エラー: ネットワークとAWS CLIのログイン状態を確認して再実行します。エラー詳細に個人のプロファイル名などが含まれる場合があるため、公開場所へそのまま貼り付けないでください。
-- `uv`が見つからない、または依存関係の取得に失敗する: `uv --version`とインターネット接続を確認します。AWS接続に進む前に`uv sync`を完了してください。
-
-## 料金と後片付け
-
-この演習はSTSの`GetCallerIdentity`だけを実行し、AWS resourceやSecrets Managerのsecretを作りません。Bedrockやその他の従量課金APIも呼ばないため、この演習によるAWSサービス利用料金は発生しません。`uv sync`はboto3などのPythonパッケージをダウンロードします。
-
-演習後は、実行中のプログラムを終了します。PowerShellでは次のコマンドで、このターミナルに設定したプロファイルとリージョンを解除できます。
-
-```powershell
-Remove-Item Env:AWS_PROFILE -ErrorAction SilentlyContinue
-Remove-Item Env:AWS_DEFAULT_REGION -ErrorAction SilentlyContinue
+```text
+python -m unittest discover -s sections/s04/l03 -p "test_*.py" -v
 ```
 
-macOS / Linux:
+`ModuleNotFoundError`が出た場合は、`main.py`と`check_data.py`が両方`sections/s04/l03/`にあり、コマンドをrepository最上位で実行したかを確認します。このSectionはローカルファイルだけを扱い、AWSリソースや料金は発生しません。
 
-```sh
-unset AWS_PROFILE AWS_DEFAULT_REGION
+## クラス・インスタンス・メソッドの演習
+
+この演習では、関数版とクラス版で同じ表示を作ります。実行します。
+
+```text
+python -X utf8 sections/s04/l04/class_check_item.py
 ```
 
-仮想環境は次の演習でも使えるよう残して構いません。不要になった場合は、リポジトリ最上位からこの演習の`.venv`だけを削除します。
-
-Windows PowerShell:
-
-```powershell
-if (Test-Path -LiteralPath .\sections\s04\l04\.venv) { Remove-Item -LiteralPath .\sections\s04\l04\.venv -Recurse }
-Test-Path -LiteralPath .\sections\s04\l04\.venv
+```text
+API応答: ok
+API応答: ok
 ```
 
-macOS / Linux:
+1行目は関数、2行目は`CheckItem`クラスのインスタンスが`format`メソッドで作った結果です。どちらも`status`だけを受け取り、`API応答`は固定の表示名です。`return`は文字列を呼び出し元へ返し、`print`が画面へ表示します。
 
-```sh
-if [ -d sections/s04/l04/.venv ]; then rm -r -- sections/s04/l04/.venv; fi
-test ! -e sections/s04/l04/.venv && echo "演習用仮想環境を削除しました"
+`sections/s04/l04/class_check_item.py`の`CheckItem("ok")`にある`"ok"`だけを`"needs_review"`に変え、実行前に2行目を予想してください。実行すると次のようになります。
+
+```text
+API応答: ok
+API応答: needs_review
 ```
 
-削除確認が`False`（Windows）または「演習用仮想環境を削除しました」（macOS / Linux）なら、仮想環境は残っていません。`pyproject.toml`と`uv.lock`は依存関係の再現に使うため残します。
-
-## 参考資料
-
-- [Boto3 credentials](https://boto3.amazonaws.com/v1/documentation/api/latest/guide/credentials.html)
-- [AWS SDKs and tools shared config and credentials files](https://docs.aws.amazon.com/sdkref/latest/guide/file-location.html)
-- [AWS CLI: get-caller-identity](https://docs.aws.amazon.com/cli/latest/reference/sts/get-caller-identity.html)
-- [AWS STS API: GetCallerIdentity](https://docs.aws.amazon.com/STS/latest/APIReference/API_GetCallerIdentity.html)
-- [AWS IAM: Service cost information (IAM, IAM Identity Center, and STS)](https://docs.aws.amazon.com/IAM/latest/UserGuide/introduction.html)
-- [AWS CloudShell: features and pricing](https://docs.aws.amazon.com/cloudshell/latest/userguide/welcome.html)
-- [AWS Secrets Manager: Retrieve secrets](https://docs.aws.amazon.com/secretsmanager/latest/userguide/retrieving-secrets.html)
-
-この教材コードはリポジトリのルートにある[MIT License](../../LICENSE)の条件で利用できます。
+確認後は値を`"ok"`へ戻します。この演習はローカルで動作し、AWSへの接続は不要です。

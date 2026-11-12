@@ -1,200 +1,167 @@
-# Section 09: S3の調査メモを読む
+# 要約を引き継ぎ用ファイルへ保存する
 
-この演習では、架空の障害調査メモをS3に置き、boto3で読み取ってAmazon BedrockのConverse APIへ渡します。最後に、ローカルファイルとS3を同じアプリで切り替え、同じ原文に対するプロンプト変更前後の応答を人が照合します。モデルの応答だけで原因や対応を決めないでください。
-
-## これまでのPython・AWS学習を完成アプリで使う場所
-
-| 学んだこと | Section 9で確認する場所 | 役割 |
-| --- | --- | --- |
-| S03: 変数、条件分岐、関数、例外 | `s09_app.py` の `args`、`load_note`、`main` と `try` / `except` | 選択値から入力関数を決め、失敗を表示して終了する |
-| S03: list と dict | `s09_common.py` の `messages` / `content` と戻り値、`s09_app.py` の `result` | APIへ渡すメッセージと本文・利用量・応答時間をまとめて扱う |
-| S04: AWS profile と認証 | `s09_common.py` の `boto3.Session()` | コードへ鍵を書かず、設定済みprofileでS3 / Bedrock clientを作る |
-| S05: Converse API | `s09_common.py` の `ask_model` | メモと依頼を送り、応答本文と利用量を返す |
-| S06: CLIと会話アプリ | `s09_app.py` の `argparse` と `main` | `--source` / `--task` を受け取って一回の処理を実行する。このアプリは会話履歴を保持しない |
-| S07: ローカルファイル入力 | `s09_common.py` の `read_local_text` | ローカル入力を文字列にし、S3入力と同じ後続処理へ渡す |
-| S08: 同じ入力で変更を比べる | `s09_l06.py` の `compare` と表示されるtoken数・応答時間 | 同じメモへのprompt変更前後を人が原文と照合する |
-| S09: S3入力の追加 | `s09_app.py` の `load_note` と `s09_l03.py` の `read_s3_text` | S3の本文も文字列にして、ローカル入力と共通の処理へ渡す |
-
-`argparse` がコマンドラインを `args` に入れます。`args.source`、`args.path`、`args.bucket`、`args.key` が `load_note(args.source, args.path, args.bucket, args.key)` に渡り、関数がローカルまたはS3から読んだ本文を文字列で返します。`main` はその戻り値を `note` に入れ、`ask_model(create_bedrock_client(), note, args.task, args.question)` に渡します。戻り値は `text`、`input_tokens`、`output_tokens`、`latency_ms` を持つdictで、`main` が `result` に受けて `print` します。
-
-`args.source` が `local` なら `args.path` を `read_local_text` へ、`s3` なら `args.bucket` と `args.key` を `read_s3_text` へ渡します。読み込みに失敗すればBedrockのAPI呼び出し前に終了し、入力元に応じた確認先を表示します。読み込み後にConverseが失敗した場合は別の案内を表示し、AWS profileの認証、model ID、Region、`bedrock:InvokeModel`権限とquotaを確認します。どちらのエラー表示にもAWSの応答本文やcredentialは含めません。`args.task` の `summary` / `checks` / `ask` は依頼内容を選び、`ask` では `args.question` も必要です。
+この演習では、架空の障害調査メモをUTF-8のテキストファイルから読み、Amazon Bedrock Converse APIで短く要約します。要約は調査結果の代わりにはなりません。実行後に必ず原文と照合し、記載された事実と不明な項目を確認します。
 
 ## 準備
 
-- Python 3.11以上、[uv](https://docs.astral.sh/uv/)、AWS CLIを使えるローカル環境を用意します。
-- AWS認証は既存のAWS CLI profileまたはIAM Identity Center profileを利用します。コードにaccess keyを書きません。
-- AWS profileとRegionを設定し、操作対象を確認します。`<profile>`と`<region>`は自分の値に置き換えます。
+- Python 3.11以降
+- `uv`
+- AWS CLI v2で設定したAWSプロファイルと有効なログインセッション
+- Amazon Bedrockで利用できるモデル（初期値: `amazon.nova-lite-v1:0`）
+- 対象モデルへの`bedrock:InvokeModel`権限
 
-```sh
-aws sts get-caller-identity --profile <profile>
-aws configure get region --profile <profile>
+AWS認証情報をコードや`.env`ファイルへコピーしません。IAM Identity Centerを利用する場合、先にAWS CLIでログインします。
+
+```text
+aws sso login --profile <profile-name>
 ```
 
-表示されたアカウントが演習用であることを確認してください。想定外のアカウントならここで止め、正しいprofileを選び直します。以降のPython commandを実行する同じterminalでprofileとRegionを指定します。
+リポジトリの最上位フォルダーからSection 09へ移動し、プロファイルとリージョンを設定します。モデルが対象リージョンで利用できることも確認してください。
 
-```sh
-export AWS_PROFILE=<profile>
-export AWS_DEFAULT_REGION=<region>
-```
-
-PowerShellでは次のように設定します。
+Windows PowerShell:
 
 ```powershell
-$env:AWS_PROFILE = "<profile>"
-$env:AWS_DEFAULT_REGION = "<region>"
-```
-
-作るresourceは、指定したRegionの新しいS3 general purpose bucket 1個と、その中の`training/s09/incident-note.txt`だけです。bucketは世界で一意な名前が必要です。既存bucketは使わず、S3演習専用の新しい名前を決めます。scriptも既存bucketを検出したら書き込みません。
-
-## 準備とS3への配置（s09-l02）
-
-リポジトリの最上位で依存関係を用意します。
-
-```sh
-uv sync --project sections/s09
-```
-
-アカウントIDとRegionをもう一度確認し、bucket名を一意な値へ置き換えてから実行します。
-
-```sh
-uv run --project sections/s09 python sections/s09/s09_l02.py --bucket <unique-bucket-name> --region <region>
-```
-
-成功すると作成したbucket、object URI、Regionが表示されます。表示された3項目をcleanupまで控えてください。途中でobject uploadに失敗した場合、bucketだけが残ることがあります。cleanup手順で中身を確認し、空にしてから削除します。
-
-## boto3で指定したS3 objectを読む（s09-l03）
-
-```sh
-uv run --project sections/s09 python sections/s09/s09_l03.py --bucket <unique-bucket-name>
-```
-
-演習用の架空メモが表示されます。`--key`を省略した場合の既定値は`training/s09/incident-note.txt`です。この演習では別のkeyを指定せず、L02で配置したobjectだけを読みます。
-
-## 要約・確認項目・追加質問（s09-l04 / s09-l05）
-
-まずローカル入力で要約します。
-
-```sh
-uv run --project sections/s09 python sections/s09/s09_app.py --source local --task summary
-```
-
-同じメモから、次に確認する項目を挙げます。
-
-```sh
-uv run --project sections/s09 python sections/s09/s09_app.py --source local --task checks
-```
-
-S3入力に切り替えて、担当者からの追加質問を実行します。
-
-```sh
-uv run --project sections/s09 python sections/s09/s09_app.py --source s3 --bucket <unique-bucket-name> --task ask --question "影響した注文数は確認できていますか"
-```
-
-応答を表示された原文と照合し、各主張の根拠と未確認事項を自分で確かめます。メモにはエラー率低下、timeoutを含むログ3件、デプロイ履歴の調査開始が書かれています。一方、timeoutが原因だったか、影響注文数、デプロイの有無、ロールバック要否は未確認です。モデルがこれらを確定事項のように答えた場合はその箇所を記録し、追加確認が必要と判断してください。
-
-## 同じ原文で変更前後を比べる（s09-l06）
-
-まず編集前の`REVISED`結果を記録します。次のcommandは同じローカルメモに、元から異なる`BASELINE`と`REVISED`の2つのプロンプトを適用します。この初回の2結果は、コード編集前後の組ではありません。PowerShellでは`Tee-Object`で表示と同時に結果を保存します。
-
-```powershell
-uv run --project sections/s09 python sections/s09/s09_l06.py --source local 2>&1 | Tee-Object -FilePath s09-l06-before.txt
-```
-
-macOS / Linuxでは、`2>&1 | tee s09-l06-before.txt`をcommandの末尾に付けてください。出力が届くたびに画面表示と保存を行います。
-
-続いて`sections/s09/s09_l06.py`を開き、`REVISED_PROMPT`の末尾に「影響した注文数は未確認なら未確認と明記してください。」を追加して保存します。`BASELINE_PROMPT`、`sample/incident-note.txt`、入力元、モデル、Regionは変えません。`main`が同じメモを`load_note`で1回読み、`compare`がその文字列を既存の`BASELINE`と`REVISED`の指示で2回の`ask_model`へ渡す箇所をコードで確認してください。表示される2組の回答とtoken量・応答時間が出力です。
-
-同じcommandを再実行し、編集前に控えた`REVISED`の結果と編集後の`REVISED`の結果を並べてください。再実行時も出力を保存します。
-
-```powershell
-uv run --project sections/s09 python sections/s09/s09_l06.py --source local 2>&1 | Tee-Object -FilePath s09-l06-after.txt
-```
-
-macOS / Linuxでは、同じように`2>&1 | tee s09-l06-after.txt`を使います。
-
-`BASELINE`と`REVISED`は元から別々の指示であり、画面に並ぶ2つをそのまま「編集前／編集後」とは呼びません。`BASELINE`側のpromptも同じですが、生成結果は実行ごとに揺れるため、文字列の完全一致を合否基準にしません。`s09-l06-before.txt`と`s09-l06-after.txt`を使って編集前後の`REVISED`を原文と照合します。これらはリポジトリ直下にできるローカル記録で、公開repositoryへ追加しません。出力の上限は1件512 tokensです。応答は`stopReason: end_turn`の完了時だけ表示します。それ以外なら不完全応答として使わず停止し、SDKによる自動再送もしません。次にAWS APIを呼ばないunit testを実行し、同じメモを2回の推論へ渡すテストが成功することを確認します。
-
-```sh
-uv run --directory sections/s09 python -m unittest discover -s tests -v
-```
-
-`sample/incident-note.txt`の原文と各回答を照合し、影響した注文数を根拠なく断定していないか、確認済みの事実と未確認事項が分かれているかを記録します。コードの編集箇所、入力→処理→出力、テスト結果、原文との一致・不一致を根拠に、その変更を採用・修正・保留のどれにするか決めてください。提案されたコードを確認せず正解として扱わないでください。`--source s3 --bucket <unique-bucket-name>`へ変えれば、S3から読み取った同じメモでも比較できます。S3へ切り替える場合は、比較する間の入力元をそろえます。
-
-各実行で入力token、出力token、Bedrock応答時間を表示します。料金は選択したモデルとRegion、実際のtoken量で変わります。モデルとRegionを決めたら[Amazon Bedrock料金表](https://aws.amazon.com/bedrock/pricing/)で入力・出力単価を確認し、単価の課金単位に合わせて見積もってください。比較commandは推論を2回呼び出すため、再実行ごとに追加料金がかかり得ます。S3のbucket作成自体に料金はありませんが、オブジェクト保管、request、データ転送等が発生し得ます。小さな教材メモ1個に限定し、演習後は削除してください。[Amazon S3料金表](https://aws.amazon.com/s3/pricing/)を参照します。
-
-## 権限
-
-必要な権限は次の操作に限定します。
-
-- 準備: bucket存在確認の`s3:ListBucket`、`s3:CreateBucket`、固定keyへの`s3:PutObject`
-- S3入力: 固定keyへの`s3:GetObject`
-- Section 10のcleanup: 対象keyへの`s3:DeleteObject`、空になった演習用bucketへの`s3:DeleteBucket`
-- Bedrock呼び出し: 利用するモデルに対する`bedrock:InvokeModel`
-
-権限は自分で追加せず、必要なら管理者へ対象bucket、key、actionを示して相談してください。Converse APIは`bedrock:InvokeModel`権限を必要とします。[Amazon Bedrock Converse API](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_Converse.html)と[S3 IAM action一覧](https://docs.aws.amazon.com/AmazonS3/latest/userguide/access-management.html)を参照してください。
-
-## 自動テスト
-
-テストはAWS APIを呼ばず、S3とBedrockの応答をmockします。
-
-```sh
-uv run --directory sections/s09 python -m unittest discover -s tests -v
-```
-
-## 想定と異なる場合
-
-- `AccessDenied`や`403`: `AWS_PROFILE`、表示されたアカウント、Region、対象bucket/keyと上記actionを確認します。S3に`ListBucket`権限がない場合、存在しないkeyでも404でなく403になる場合があります。
-- 入力読み込みエラー: S3入力なら`AWS_PROFILE`の認証、アカウント、Region、bucket/key、`s3:GetObject`権限を確認します。ローカル入力なら`--path`と、入力fileがUTF-8のテキストであることを確認します。この段階で失敗するとBedrockは呼び出されません。
-- Bedrock推論エラー: 入力の読み込み後に発生します。`AWS_PROFILE`の認証、`BEDROCK_MODEL_ID`、利用可能なRegion、`bedrock:InvokeModel`権限とquotaを確認します。エラー表示にモデルの応答本文やcredentialは含まれません。
-- bucket作成時の名前エラー: 別の新しい名前を選びます。既存bucketが見つかったときは上書きしません。
-- Regionエラー: `AWS_DEFAULT_REGION`とs09-l02の`--region`を同じ値にし、作成後は同じRegionを使います。
-- `NoSuchKey`: 表示されたbucketと固定keyを照合します。object名の大文字小文字も一致させます。
-- Bedrockのmodel/access/quota error: accountでのモデル利用可否、Region、`BEDROCK_MODEL_ID`、IAM権限とquotaを確認します。既定modelは`amazon.nova-lite-v1:0`で、変更する場合は`BEDROCK_MODEL_ID`へ設定します。
-- UTF-8 decode error: 指定objectがこの教材のテキストfileか確認します。
-
-エラー表示には応答本文やAWS credentialを含めません。実データ、個人情報、機密情報、credentialを入力しないでください。
-
-## Cleanup
-
-このSectionでは作成したbucket/objectを残し、Section 10で削除します。削除前に`aws sts get-caller-identity`でaccountを再確認し、手元に控えた完全なbucket名がこの演習で自分が新規作成したものと一致することを確認します。bucket名が違う場合、または他のobjectがある場合は停止し、bucket全体を削除しないでください。
-
-Section 10の手順で、まず演習objectだけを削除します。
-
-```sh
-aws s3api delete-object --bucket <unique-bucket-name> --key training/s09/incident-note.txt
-aws s3api head-object --bucket <unique-bucket-name> --key training/s09/incident-note.txt
-aws s3api list-objects-v2 --bucket <unique-bucket-name>
-```
-
-`head-object`が`404 Not Found`となり、list-objects-v2の`KeyCount`が`0`ならobjectがなく、bucketが空であることを確認できます。`404`以外、または`KeyCount`が0でなければ原因を確認し、bucketを削除しません。空の演習bucketだけを削除します。
-
-```sh
-aws s3api delete-bucket --bucket <unique-bucket-name> --region <region>
-aws s3api head-bucket --bucket <unique-bucket-name>
-```
-
-削除成功後、head-bucketがbucket不存在を示す応答になることを確認します。bucket削除は復元できない操作なので、名前・account・Regionを確認できない場合は実行しません。[DeleteBucketの注意](https://docs.aws.amazon.com/AmazonS3/latest/userguide/delete-bucket.html)を参照してください。削除後、必要ならアプリ用の一時環境だけを片付けます。
-
-`uv sync`が作った`sections/s09/.venv`を削除する場合は、演習用repositoryの最上位で次のいずれかを実行し、そのpathだけを削除してください。AWS CLI profileや認証情報は削除しません。
-
-PowerShell:
-
-```powershell
-if (Test-Path -LiteralPath .\sections\s09\.venv) { Remove-Item -LiteralPath .\sections\s09\.venv -Recurse }
-Test-Path -LiteralPath .\sections\s09\.venv
+$env:AWS_PROFILE = "<profile-name>"
+$env:AWS_DEFAULT_REGION = "ap-northeast-1"
+cd sections/s09
+uv sync
 ```
 
 macOS / Linux:
 
 ```sh
+export AWS_PROFILE="<profile-name>"
+export AWS_DEFAULT_REGION="ap-northeast-1"
+cd sections/s09
+uv sync
+```
+
+`uv sync`はこのSection専用の仮想環境へboto3を準備します。boto3は標準のAWS認証情報プロバイダーを使います。必要なら`BEDROCK_MODEL_ID`環境変数または`--model-id`で、利用可能な別モデルIDを指定できます。
+
+## L02: ファイルを読み、要約を画面へ表示する流れを追う
+
+まず、サンプルの調査メモを要約して画面に表示します。
+
+```text
+uv run python s09_l02.py --file data/investigation-notes.txt
+```
+
+このコマンドは `sections/s09` を現在のフォルダーとして実行します。そのため `data/investigation-notes.txt` は、今いる場所を基準にした相対パスです。`--file`で別の相対パスを指定するときも、Section 09のフォルダーからたどれる場所を書きます。
+
+コードでは、値が次の順に流れます。
+
+1. `s09_l02.py` の `main` が `args.file` を `read_text_file` に渡します。
+2. `s09_app.py` の `read_text_file` がそのパスをUTF-8で読み、`validate_input` が前後の空白を除きます。空の文字列や12,000文字を超える入力は例外になり、ここで処理が止まります。
+3. 読み込み関数が返した文字列を、`main` が `summarize_text` の `text` 引数へ渡します。
+4. `summarize_text` は入力をもう一度確認し、system指示と文字列を含むuserメッセージを作って `client.converse` を呼びます。
+5. `summarize_text` は応答dictの `stopReason` も確認します。`end_turn` なら最初の `text` blockを返し、`main` が画面へ表示します。`max_tokens` なら途中までの文を完成した要約として返さず、上限で終了した案内を表示します。通常完了でもtext blockがなければ、要約テキストがないことを表示します。
+
+### 要約を引き継ぎ用Markdownへ保存する
+
+画面の要約を別の担当者へ渡すときは、コピーして文書へ貼り直す代わりに `--output` を指定します。次の例は `sections/s09` から実行し、`report.md` を同じフォルダーへ作成します。
+
+```text
+uv run python s09_l02.py --file data/investigation-notes.txt --output report.md
+```
+
+保存先は現在の作業フォルダーを基準にします。保存先の親フォルダーは事前に作成してください。成功すると入力ファイル名と要約を含むUTF-8 Markdownが作られ、保存場所が表示されます。`report.md`を開き、ファイル名と要約があることを確認してください。要約は原文と照合して利用します。
+
+`--output`を省いた実行は、従来どおり要約を画面へ表示し、レポートファイルを作りません。指定した保存先が既にある場合は別の名前を選び、親フォルダーがない場合はそのフォルダーを作成するか保存先を変更してください。どちらもBedrockを呼び出す前に案内して終了します。既存ファイルを上書きしたり、フォルダーを自動作成したりしません。書き込みエラーが起きた場合は保存先のパス、空き容量、書き込み権限を確認してください。書き込み途中で失敗すると不完全なfileが残る場合があります。内容を確認し、この実行で作られたものと確認できた場合に限って個別に削除してください。再試行には別の未使用file名を指定します。どの失敗も成功とは表示せず、終了コードは0以外です。Bedrockの処理が失敗した場合、レポートは作成されません。
+
+同じ入力ファイルを保存先にも指定しないでください。入力を読み込んだ後、内容を壊さないよう保存先の検査と排他的な新規作成を行います。
+
+API呼び出しが成功して応答が返ったことと、回答が通常完了したことは別です。`stopReason`を確認するのは、途中までの文章を完成した要約として使わないためです。この演習では自動再試行や出力上限の自動変更はしません。
+
+system指示は日本語で100字程度の要約を求め、応答の最大長は512 tokensです。入力ファイルは12,000文字までです。別のファイルを使う場合も、Bedrockにはファイルの内容全体が送信されます。**この演習では公開済みの架空サンプルだけを使ってください。実データ、個人情報、認証情報、機密情報や業務データを含むファイルは指定しないでください。**
+
+出力が表示された場合もファイルへ保存した場合も、`data/investigation-notes.txt`を開き、要約の各文が原文のどこにあるか確認します。とくに、原因、影響範囲、復旧状況を原文以上に断定していないかを確認してください。モデルの文章は実行ごとに異なります。原文にない内容があれば、そのまま結論として使わず、原文を根拠に判断します。
+
+## L04: 保存の仕様と編集するコードを決める
+
+画面に表示された要約を引き継ぐには、ファイルへ保存できる必要があります。実装前に、保存先・保存内容・保存を指定しない場合・失敗時の扱いを決めます。
+
+このSectionの受入条件は次のとおりです。
+
+- `--output report.md` を指定すると、入力ファイル名と要約をUTF-8 Markdownへ保存する
+- `--output`を省くと、今までどおり画面へ表示し、ファイルを作らない
+- 既にある保存先、ない親フォルダー、入力ファイルと同じ保存先、書き込み失敗では非0で終了し、成功したと案内しない
+- 既存ファイルを上書きせず、親フォルダーを自動作成しない
+
+実装箇所は `s09_l02.py` の `--output` 引数と処理分岐、`s09_app.py` の保存先確認とMarkdown保存関数、`tests/test_s09.py` の正常系・失敗系テストです。ここでは受入条件と編集箇所を決め、実際の変更とテストはL05で行います。
+
+## L05: 保存機能を実装し、テストで確かめる
+
+この演習では、画面に表示していた要約を引き継ぎ用Markdownへ保存できるようにします。開始用コードは外部repositoryのbaseline commit `3fdba894161c95f90ee85d3ec0efd816cdc73594` にある次の3ファイルです。既に用意している作業用リポジトリへ同じpathで保存し、ほかのSectionや設定fileを置き換えないでください。
+
+- [開始用 s09_l02.py（baseline 3fdba89）](https://raw.githubusercontent.com/toma1110/python-generative-ai-app-development-amazon-bedrock/3fdba894161c95f90ee85d3ec0efd816cdc73594/sections/s07/s07_l02.py)
+- [開始用 s09_app.py（baseline 3fdba89）](https://raw.githubusercontent.com/toma1110/python-generative-ai-app-development-amazon-bedrock/3fdba894161c95f90ee85d3ec0efd816cdc73594/sections/s07/s07_app.py)
+- [開始用 tests/test_s09.py（baseline 3fdba89）](https://raw.githubusercontent.com/toma1110/python-generative-ai-app-development-amazon-bedrock/3fdba894161c95f90ee85d3ec0efd816cdc73594/sections/s09/tests/test_s09.py)
+
+まず `s09_l02.py` に任意の `--output` を追加します。保存先が既にある、親フォルダーがない、入力ファイルと同じ場所を指定した場合はBedrockを呼び出す前に終了します。`s09_app.py` には保存先確認と、入力ファイルのbasename・要約・原文との照合案内をUTF-8 Markdownへ書く `save_summary` を用意します。排他的な新規作成で既存fileを上書きしません。要約の取得に成功した後で保存し、`--output`を省いたときは従来どおり画面へ表示します。APIや書き込みが失敗した場合は非0で終了し、保存成功を案内しません。
+
+テストは `FakeClient` を使い、Bedrockへ接続しません。保存した本文の文字コードと構成、画面表示の従来動作、既存保存先・入力との衝突・親フォルダーなしではclientを作らないこと、API失敗時にfileを作らないこと、書き込み失敗を成功扱いしないことを確かめます。書き込み途中の失敗で部分fileが残るケースも確認します。追加した9テストと、既存18テストを実行します。
+
+`sections/s09` から次を実行してください。
+
+```text
+uv run python -m unittest discover -s tests -v
+```
+
+27件すべてが成功したら、L02の保存コマンドを実行して `report.md` を開き、入力ファイル名と今回の要約があることを確認します。FakeClientやunit testが確かめるのは保存処理やコードの動作です。固定応答を保存できても、要約が原文に忠実だとは分かりません。実際の要約を利用する場合は、原文と照合して事実と不明な項目を確認します。出力の内容評価と改善はS08で扱います。
+
+### FakeClientとテストで確かめる範囲
+
+スタブはテスト時に外部サービスの代わりとなり、決められた応答を返します。このSectionの `FakeClient` はその実装名です。新しい9テストは、UTF-8 Markdownへの保存、既定の画面表示、既存保存先・入力との衝突・親フォルダーなしでの事前終了、API失敗時に保存しないこと、書き込み失敗時の非0終了と成功案内の抑止、部分fileが残ることを確認します。既存の18テストはファイル読み込み・入力条件、Converseへ渡す内容、応答テキストと終了理由を確認します。
+
+通常のunit testが確かめるのは戻り値、例外、CLIの終了結果など、コードに書かれた動作です。FakeClientの固定応答を保存できても、その文章が原文に忠実だとは分かりません。要約の各文を原文と照合し、事実と不明な項目を見分ける内容評価はS08で扱います。参考例として「DB接続待ちが発生した」という原文を要約が「原因はDBだった」と断定するケースを考えられますが、これは説明用であり、実行で観測した出力ではありません。
+## 料金と権限
+
+L02の有効な実行では、Bedrock Runtimeへ1回リクエストします。課金はモデル、リージョン、入力・出力tokensなどで変わります。短い教材用ファイルを使い、実行前に[Amazon Bedrock料金表](https://aws.amazon.com/bedrock/pricing/)で対象モデルとリージョンの料金を確認してください。出力tokensには上限を設定していますが、実際の料金は利用状況によって異なります。
+
+L04の仕様確認と、L05のunit testはローカルで動き、AWSへ接続しません。L02で実際に要約する場合はBedrock Runtimeへ接続しますが、`--output`は同じ要約結果を保存するだけで追加のAPI呼び出しをしません。このSectionはAWS resourceを作りません。権限は対象モデルへの`bedrock:InvokeModel`に限定し、利用モデルとリージョンは自分のAWS環境で利用可能なものを選びます。
+
+## 後片付け
+
+このSectionはAWS resourceやクラウド上のファイルを作成しません。L02で自分が作成した `sections/s09/report.md` を削除する場合は、そのfileが今回の演習で作ったものだと確認してから、Section 09のディレクトリーで次を実行します。指定したfileだけを削除します。保存先に別の名前を使った場合は、その自分が作成したfileを確認して個別に削除してください。
+
+Windows PowerShell:
+
+```powershell
+if (Test-Path -LiteralPath .\report.md) { Remove-Item -LiteralPath .\report.md }
+Test-Path -LiteralPath .\report.md
+```
+
+`False`なら `report.md` はありません。続けて仮想環境を削除する場合は、Section 09のディレクトリーからリポジトリ最上位へ戻り、`.venv`だけを削除します。
+
+Windows PowerShell:
+
+```powershell
+cd ../..
+if (Test-Path -LiteralPath .\sections\s09\.venv) { Remove-Item -LiteralPath .\sections\s09\.venv -Recurse }
+Test-Path -LiteralPath .\sections\s09\.venv
+```
+
+結果が`False`なら削除できています。
+
+macOS / Linux:
+
+```sh
+if [ -f report.md ]; then rm -- report.md; fi
+test ! -e report.md && echo "report.mdはありません"
+```
+
+続けて仮想環境を削除する場合は、Section 09のディレクトリーからリポジトリ最上位へ戻ります。
+
+```sh
+cd ../..
 if [ -d sections/s09/.venv ]; then rm -r -- sections/s09/.venv; fi
 test ! -e sections/s09/.venv && echo "s09の仮想環境を削除しました"
 ```
 
+必要なら`AWS_PROFILE`、`AWS_DEFAULT_REGION`、`BEDROCK_MODEL_ID`を現在のターミナルから解除します。AWS CLIのプロファイルや認証情報は削除しません。
+
 ## 参考資料
 
-- [S3 GetObject API](https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html)
-- [S3 bucket作成](https://docs.aws.amazon.com/AmazonS3/latest/userguide/creating-bucket.html)
-- [Amazon Bedrock Converse API](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_Converse.html)
+- [Amazon Bedrock Converse APIのPython演習](https://docs.aws.amazon.com/bedrock/latest/userguide/getting-started-api-ex-python.html)
+- [Converse APIのリクエストとinferenceConfig](https://docs.aws.amazon.com/bedrock/latest/userguide/conversation-inference.html)
 - [Amazon Bedrock料金表](https://aws.amazon.com/bedrock/pricing/)
-- [Amazon S3料金表](https://aws.amazon.com/s3/pricing/)

@@ -1,54 +1,88 @@
-"""Create one empty general purpose S3 bucket and upload the fixed demo note."""
+"""Summarize a local UTF-8 text file using Amazon Bedrock Converse."""
 
 import argparse
 import sys
-from pathlib import Path
 
 from botocore.exceptions import BotoCoreError, ClientError
 
-from s09_common import configure_console, create_s3_client
-
-SAMPLE_PATH = Path(__file__).parent / "sample" / "incident-note.txt"
-OBJECT_KEY = "training/s09/incident-note.txt"
-
-
-def prepare_bucket(client, bucket, region, note_bytes):
-    try:
-        client.head_bucket(Bucket=bucket)
-    except ClientError as error:
-        status = error.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
-        code = error.response.get("Error", {}).get("Code")
-        if status != 404 and code not in {"404", "NoSuchBucket", "NotFound"}:
-            raise ValueError("バケットの存在を確認できません。名前・権限・アカウントを確認し、既存バケットへ上書きしないでください。") from error
-    else:
-        raise ValueError("指定したバケットは既に存在します。演習専用の新しい名前を指定してください。")
-
-    request = {"Bucket": bucket}
-    if region != "us-east-1":
-        request["CreateBucketConfiguration"] = {"LocationConstraint": region}
-    client.create_bucket(**request)
-    client.put_object(Bucket=bucket, Key=OBJECT_KEY, Body=note_bytes, ContentType="text/plain; charset=utf-8")
-    return OBJECT_KEY
+from s09_app import (
+    IncompleteResponseError,
+    OutputFileError,
+    configured_model_id,
+    create_client,
+    read_text_file,
+    save_summary,
+    summarize_text,
+    validate_output_path,
+)
 
 
 def main(argv=None):
-    configure_console()
-    parser = argparse.ArgumentParser(description="架空の調査メモを新しいS3バケットへ配置します。")
-    parser.add_argument("--bucket", required=True, help="自分で用意した一意な演習用バケット名")
-    parser.add_argument("--region", required=True, help="作成するAWS Region")
+    parser = argparse.ArgumentParser(description="ローカルの調査メモをBedrockで要約します")
+    parser.add_argument("--file", required=True, help="UTF-8のテキストファイル")
+    parser.add_argument("--output", default=None, help="要約を保存するMarkdownファイル")
+    parser.add_argument("--model-id", default=None, help="利用可能なBedrockモデルID")
     args = parser.parse_args(argv)
+
     try:
-        key = prepare_bucket(create_s3_client(args.region), args.bucket, args.region, SAMPLE_PATH.read_bytes())
+        source = read_text_file(args.file)
+    except FileNotFoundError:
+        print("指定したファイルが見つかりません。パスとファイル名を確認してください。", file=sys.stderr)
+        return 2
+    except IsADirectoryError:
+        print("指定先はファイルではなくフォルダーです。テキストファイルを指定してください。", file=sys.stderr)
+        return 2
+    except UnicodeDecodeError:
+        print("ファイルをUTF-8として読み取れません。文字コードを確認してください。", file=sys.stderr)
+        return 2
+    except OSError:
+        print("ファイルを読み取れません。パスと読み取り権限を確認してください。", file=sys.stderr)
+        return 2
     except ValueError as error:
-        print(error, file=sys.stderr)
+        print(str(error), file=sys.stderr)
+        return 2
+
+    if args.output:
+        try:
+            validate_output_path(args.file, args.output)
+        except OutputFileError as error:
+            print(str(error), file=sys.stderr)
+            return 2
+
+    try:
+        answer = summarize_text(create_client(), source, args.model_id or configured_model_id())
+    except ClientError as error:
+        code = error.response.get("Error", {}).get("Code", "不明")
+        print(f"Bedrock APIエラーコード: {code}。モデル利用可否、リージョン、権限、クォータを確認してください。", file=sys.stderr)
         return 1
-    except (BotoCoreError, ClientError, OSError) as error:
-        print(f"S3の準備に失敗しました ({type(error).__name__})。認証、Region、権限を確認してください。", file=sys.stderr)
-        print("バケット作成後に失敗した場合は、READMEのcleanup手順でオブジェクトと空のバケットを削除してください。", file=sys.stderr)
+    except BotoCoreError:
+        print("AWSへ接続できません。プロファイル、ログイン状態、リージョンを確認してください。", file=sys.stderr)
         return 1
-    print(f"作成したバケット: {args.bucket}")
-    print(f"配置したオブジェクト: s3://{args.bucket}/{key}")
-    print(f"Region: {args.region}")
+    except IncompleteResponseError as error:
+        print(str(error), file=sys.stderr)
+        return 1
+    except ValueError as error:
+        print(str(error), file=sys.stderr)
+        return 1
+
+    if args.output:
+        try:
+            saved_path = save_summary(args.file, args.output, answer)
+        except (OutputFileError, OSError) as error:
+            if isinstance(error, OutputFileError):
+                message = str(error)
+            else:
+                message = (
+                    "保存先へ書き込めません。保存先のパス、空き容量、書き込み権限を確認してください。"
+                    "不完全なファイルが残っている場合があります。内容を確認し、再試行する場合は別のファイル名を指定してください。"
+                    f" ({error})"
+                )
+            print(message, file=sys.stderr)
+            return 1
+        print(f"要約を保存しました: {saved_path}")
+    else:
+        print("要約（原文と照合して利用してください）:")
+        print(answer)
     return 0
 
 

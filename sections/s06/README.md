@@ -1,30 +1,46 @@
-# Section 06: CLIチャットと会話履歴
+# Section 06: APIとAWS接続
 
-この演習では、CLIからAmazon Bedrockへ質問し、応答を受け取る小さなチャットを作ります。複数の質問を続けるとき、過去のメッセージを次のリクエストにも含める方法と、含めない方法を比べます。最後に終了操作と、秘密情報を表示しないエラー確認を加えます。
+このSectionでは、PythonアプリからAPIへ送る入力と応答を確認し、AWS認証情報とアプリ固有の秘密情報の違いを学びます。L02は[HTTPの要求と応答を確かめる教材](l02/README.md)で、ローカルAPIのGET・POST・JSONを扱います。L04では認証情報をコードへ書かずにAWSへ接続し、実行先のアカウントとリージョンを確かめます。
 
-## 準備
+## L02: HTTPの要求と応答を確かめる
+
+このローカル演習にはPython 3.11以降と`curl`が必要です。AWS CLI、AWSアカウント、uvの準備は不要です。手順は[L02 README](l02/README.md)を確認してください。
+
+## L04の準備
+
+Course仕様に合わせ、L04は受講者のPC上でCLIまたはVS Codeから実行する手順を示します。PCでL04を実行する場合だけ、次のAWS接続設定を準備します。
 
 - Python 3.11以降
 - `uv`
-- AWS CLI v2で設定したAWSプロファイルと有効なログインセッション
-- Amazon Bedrockで利用できるモデル。初期設定は`amazon.nova-lite-v1:0`
-- 対象モデルに対する`bedrock:InvokeModel`権限
+- AWS CLI v2
+- AWS IAM Identity Centerなどを使って設定済みのAWS CLIプロファイル
+- 選んだAWSアカウントで利用できる有効なログインセッション
 
-認証情報をコードや`.env`へコピーしません。IAM Identity Centerを使う場合は、演習前にログインします。
+AWS CLIでまだプロファイルを設定していない場合は、組織のAWS管理者が案内する方法を使ってください。新しいアクセスキーを発行したり、ソースコードや`.env`ファイルに認証情報を保存したりしません。IAM Identity Centerのプロファイルを使う場合は、先にログインします。
 
 ```text
 aws sso login --profile <profile-name>
 ```
 
-リポジトリの最上位フォルダーで、使うプロファイルとリージョンを設定します。モデルがそのリージョンで利用できることも確認してください。
+`<profile-name>`は実際のプロファイル名に置き換えます。
+
+## L04: 認証情報をコードへ書かずに接続先を確認する
+
+リポジトリ最上位で、演習の依存関係を準備します。`uv sync`はこの演習の仮想環境へboto3をインストールします。
+
+```text
+cd sections/s06/l04
+uv sync
+```
+
+実行するシェルでプロファイルとリージョンを選びます。これらの環境変数は、コードを変えずに使うAWS設定を選ぶためのものです。認証情報そのものを環境変数へコピーする必要はありません。
 
 Windows PowerShell:
 
 ```powershell
 $env:AWS_PROFILE = "<profile-name>"
 $env:AWS_DEFAULT_REGION = "ap-northeast-1"
-cd sections/s06
-uv sync
+uv run python main.py
 ```
 
 macOS / Linux:
@@ -32,126 +48,113 @@ macOS / Linux:
 ```sh
 export AWS_PROFILE="<profile-name>"
 export AWS_DEFAULT_REGION="ap-northeast-1"
-cd sections/s06
-uv sync
+uv run python main.py
 ```
 
-`uv sync`で、この演習専用の仮想環境にboto3を準備します。認証にはboto3の標準認証情報プロバイダーを使います。必要なら環境変数`BEDROCK_MODEL_ID`で、利用可能な別モデルIDを指定できます。
+プロファイル名とリージョンは、自分が使うものに置き換えてください。`AWS_PROFILE`はAWS CLIとboto3が参照する名前付きプロファイルを選びます。`AWS_DEFAULT_REGION`はこのシェルで使うリージョンを指定します。リージョンを環境変数で指定しない場合、boto3は選択したプロファイルの共有AWS設定からリージョンを読み取ります。
 
-## L02: CLIから質問する
+プログラムはSTSの`GetCallerIdentity`を呼び、応答に含まれるAWS Account IDと、boto3セッションが選んだリージョンを表示します。Account IDが自分の想定したAWSアカウントと一致すること、リージョンが演習で使う予定のものと一致することを確認してください。ARNや認証情報は表示しません。違うアカウントが表示された場合は、そのまま次の演習へ進まず、プロファイルやシェルの設定を確認します。
 
-```text
-uv run python s06_l02.py
-```
+実コードの各部分をPythonの基礎用語と対応させます。丸括弧`()`のある箇所はクラスやメソッドの呼び出しで、`session.region_name`は丸括弧なしの属性参照です。
 
-質問を入力すると、プログラムは`role: "user"`のメッセージを一つ作り、Converse APIを一度呼び出して本文を表示します。表示される文章はモデルが生成するため、実行ごとに変わる場合があります。空の質問を入力するとAPIを呼ばずに終了します。
+| コード | Pythonの要素 | このプログラムでの役割 |
+| --- | --- | --- |
+| `boto3.Session()` | クラスの呼び出し | `Session`クラスからSession objectを作り、変数`session`へ代入します。 |
+| `session.client("sts", region_name=region)` | メソッドの呼び出し | `session` objectの`client`メソッドがSTS client objectを返します。Sessionの認証情報と指定したリージョンを使います。 |
+| `session.region_name` | property（属性）の参照 | `session` objectから設定済みリージョンの値を読みます。ここでは括弧を付けて呼び出しません。 |
+| `sts_client.get_caller_identity()` | clientのメソッド呼び出し | STSの`GetCallerIdentity` APIを実行し、応答をPythonの辞書として受け取ります。 |
+| `response["Account"]` | 辞書のkey参照 | 応答辞書から`Account`の値（AWS Account ID）を取り出します。 |
 
-`converse_turn()`と`s06_l02.py`を見て、CLI入力がメッセージになり、応答本文が表示される流れを追ってください。
+`client(...)`が作るのは、STS操作に使うclient objectです。この演習の`GetCallerIdentity`要求は、その後の`get_caller_identity()`で行います。今回のプログラムはAccount IDとリージョンだけを表示します。
 
-処理は次の順です。`input()`が返す文字列を`question`に入れ、`.strip()`で前後の空白を除きます。`if not question`は空文字列かを調べ、空なら`return 0`で`main()`を終えるのでBedrockは呼びません。質問がある場合は`create_client()`がboto3のBedrock Runtime clientを作り、`converse_turn()`へclient、空の履歴`[]`、質問を渡します。`message("user", question)`が次のdictを作ります。
+ここではS03で学んだ変数、関数、辞書を使っています。`main()`が`session`と`region`を変数に入れて`read_target()`へ渡し、関数がresponse辞書から`account_id`を取り出して返します。呼び出し元の`main()`は、その値と`region`を`print()`で表示します。Account IDはSTS応答の`Account`から、Regionはboto3 Sessionの設定から来ます。STS応答自体にRegionは含まれません。
 
-```python
-{"role": "user", "content": [{"text": "入力した質問"}]}
-```
+認証情報は「誰としてAWSへ接続するか」を示し、IAM権限は「そのIDで何を実行できるか」を制御します。アプリ固有の外部サービス用パスワードやAPIトークンは別の秘密情報です。必要なアプリではSecrets Managerなどへ保存し、AWSの認証情報でその値を取得する権限を管理します。この演習では秘密情報を作成・取得しません。
 
-このdictを`messages`というlistに入れてConverse APIへ渡します。APIの戻り値`response`から`output → message → content`をたどり、最初の`text`を`answer`として返します。最後に`print()`がその文字列を表示します。質問、`messages`、応答はそれぞれ別の値です。
+## 実行結果と接続先の判断
 
-## L03: 履歴あり・なしを比べる
+この演習ではAWSへ接続し、STSの応答からAccount IDを、boto3 Sessionの設定からRegionを表示します。成功時には自分が実行した本物の値が出ます。固定の成功出力例や架空のAccount IDは使いません。実行後、表示されたAccount IDが選んだAWSアカウントと一致すること、Regionが予定している `ap-northeast-1` であることを確認してください。一致しない場合は次へ進まず、プロファイルとシェルの設定を見直します。Account IDや認証情報を公開の投稿、画像、動画へ載せないでください。
 
-履歴ありで起動します。
+CloudShellはAWS Consoleから利用できるLinux shellですが、このCourseの実行環境は受講者のPC（CLI / VS Code）です。このREADMEにはCloudShellでのrepository取得、依存関係準備、演習directory、実行手順を示していないため、上記のPC向け手順をCloudShellへそのまま適用しないでください。
 
-```text
-uv run python s06_l03.py
-```
+この確認はAWSの読み取り専用APIを1回呼び出します。`GetCallerIdentity`にはIAM権限の追加が不要です。AWS resourceを作成・変更せず、Bedrockのモデルも呼び出しません。
 
-次の二つの入力を、この順に行います。どちらも架空の設定です。
+## 想定と異なる場合
 
-```text
-In this fictional demo, my imaginary project code is ORBIT-47. Remember it for this conversation.
-What is my imaginary project code? Answer with the code only. If no code was provided, say you do not know.
-```
+- 認証情報が見つからない、またはSSOセッションの期限切れ: 正しいプロファイルを指定し、必要なら`aws sso login --profile <profile-name>`を実行してから再実行します。
+- 想定と違うアカウントが表示される: `AWS_PROFILE`が選んだプロファイル名と、プロファイルを設定したAWSアカウントを確認します。表示された値を確認するまで次へ進みません。
+- プロファイルを指定したのに別の認証情報が使われる: `AWS_ACCESS_KEY_ID`、`AWS_SECRET_ACCESS_KEY`、`AWS_SESSION_TOKEN`の環境変数が設定されていると、プロファイルより優先される場合があります。値を表示せず、設定されている変数名だけを確認します。
 
-`/exit`または`/quit`で終了します。履歴ありでは、2回目のリクエストに最初のuserメッセージ、1回目の実際のassistant応答、2回目のuserメッセージが含まれます。
+  Windows PowerShell:
 
-同じ流れを履歴なしでも試します。
+  ```powershell
+  Get-ChildItem Env: | Where-Object Name -In @("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN") | Select-Object -ExpandProperty Name
+  ```
 
-```text
-uv run python s06_l03.py --no-history
-```
+  macOS / Linux:
 
-同じ二つの入力を、この順にもう一度行います。履歴なしでは、1回目の質問はBedrockへ送られますが、2回目のリクエストには続きの質問だけが含まれます。
+  ```sh
+  for name in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN; do
+    if printenv "$name" > /dev/null; then printf '%s is set\n' "$name"; fi
+  done
+  ```
 
-2026-11-06に同じ入力をAmazon Nova Liteへ東京リージョンのConverse APIで直接渡した比較（`maxTokens=128`、`temperature=0`）では、履歴ありの2回目は`Your imaginary project code is ORBIT-47.`、履歴なしの2回目は`I do not know.`と返りました。これは一度の比較での実際の応答で、CLIの実行結果ではありません。このCLIでは`temperature`を指定していないため、応答条件は同一ではありません。モデルの応答は実行ごとに変わるため、同じ文面になる保証はありません。履歴なしのモデルが値を推測しても、送信messagesに過去の情報が含まれない点はコードで確かめられます。履歴が長くなると、各回で送る入力token数と料金が増えることにも注目してください。
+  指定プロファイルを使う場合は、このターミナル内だけで意図しない環境変数を解除してから再実行します。値を表示したり、共有したりしないでください。
 
-ここでの`history`は、チャット中だけ使うlistです。`chat()`の最初に`history = []`で空のlistを作り、`while True`の各周回で質問を受け取ります。`converse_turn()`は履歴ありの場合、`messages = [*history, user_message]`で履歴の要素を順に含めた新しいlistを作り、現在の質問のdictを末尾に加えて送ります。2回目の質問なら、送信直前の形は概ね次のようになります。
+  ```powershell
+  Remove-Item Env:AWS_ACCESS_KEY_ID, Env:AWS_SECRET_ACCESS_KEY, Env:AWS_SESSION_TOKEN -ErrorAction SilentlyContinue
+  ```
 
-```python
-messages = [
-    {"role": "user", "content": [{"text": "In this fictional demo, my imaginary project code is ORBIT-47. Remember it for this conversation."}]},
-    {"role": "assistant", "content": [{"text": "1回目にモデルが実際に返した応答"}]},
-    {"role": "user", "content": [{"text": "What is my imaginary project code? Answer with the code only. If no code was provided, say you do not know."}]},
-]
-```
+  ```sh
+  unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+  ```
+- リージョンが空、または想定と違う: シェルの`AWS_DEFAULT_REGION`と、プロファイルのリージョン設定を確認します。環境変数に設定がある場合はそちらを直します。
+- 接続エラー: ネットワークとAWS CLIのログイン状態を確認して再実行します。エラー詳細に個人のプロファイル名などが含まれる場合があるため、公開場所へそのまま貼り付けないでください。
+- `uv`が見つからない、または依存関係の取得に失敗する: `uv --version`とインターネット接続を確認します。AWS接続に進む前に`uv sync`を完了してください。
 
-`role`と`content`を持つ各dictが一つのメッセージです。APIの応答からassistantのメッセージを取り出し、`history.extend((user_message, response["output"]["message"]))`で質問と応答の2つを元の`history`へ追加します。次の周回ではこの更新済み履歴が使われます。履歴なしのときは現在の質問だけを送信し、`history`にも追加しません。Bedrock側にこのCLIの会話状態を保存するのではなく、アプリが次のリクエストに含めています。
+## 料金と後片付け
 
-## L04: 終了と失敗時の確認
+この演習はSTSの`GetCallerIdentity`だけを実行し、AWS resourceやSecrets Managerのsecretを作りません。Bedrockやその他の従量課金APIも呼ばないため、この演習によるAWSサービス利用料金は発生しません。`uv sync`はboto3などのPythonパッケージをダウンロードします。
 
-```text
-uv run python s06_l04.py
-```
-
-`/exit`または`/quit`で終了します。ターミナルで`Ctrl+C`を押すか入力を終了した場合も、tracebackを表示せずチャットを閉じます。
-
-APIエラー時はエラーコードと、応答に含まれる場合はRequest IDを表示します。AWS接続エラーではプロファイル、ログイン状態、リージョン、ネットワークの確認を案内します。質問と応答は会話画面に表示しますが、アプリケーションのログには記録しません。例外本文や認証情報は画面にもログにも出しません。失敗後も次の質問を入力できます。
-
-`/exit`と`/quit`の判定はAPI呼び出しより前にあります。該当すれば`return 0`で`chat()`を終えます。通常の質問では`try`の中で`converse_turn()`を実行し、失敗すると対応する`except`へ移ります。`_report_error()`はエラーの種類に応じた案内を出し、`continue`で次のwhile周回へ進めます。成功した場合だけ応答を表示し、次の質問へ進みます。入力のEOFやCtrl+Cは終了経路として捕捉します。
-
-ログの設定は`main()`でWARNING以上、形式は`レベル: メッセージ`にしています。`logger.warning()`にはエラーコードや、存在する場合のRequest ID、または例外の型名だけを渡し、質問・応答・例外本文は渡しません。`ClientError`の情報は`error.response`の`Error.Code`と`ResponseMetadata.RequestId`だけを読み取ります。画面へ出す内容とログへ残す内容の違いを確認してください。
-
-原因を調べるときは、まずAWS CLIのログイン状態とプロファイル、リージョン、モデルの利用可否、IAM権限を確認します。`AccessDeniedException`なら対象モデルに対する`bedrock:InvokeModel`、`ThrottlingException`なら利用状況とクォータを確認し、連続再試行は避けてください。
-
-## 自動テスト
-
-テストはモック応答を使い、AWSへ接続しません。履歴を含むリクエスト、履歴なしのリクエスト、終了操作、エラー表示と会話継続を確認します。
-
-```text
-uv run python -m unittest discover -s tests -v
-```
-
-## 料金と権限
-
-このSectionはBedrock Runtimeへの推論を行い、AWS resourceを作成しません。各有効な質問でAPIを1回呼び、応答上限は128 tokensです。課金はモデル、リージョン、入力・出力token数で変わります。履歴ありでは過去の会話も各リクエストの入力に含まれるため、長く続けるほど入力量が増えます。実行前に[Amazon Bedrock料金表](https://aws.amazon.com/bedrock/pricing/)で対象モデルとリージョンの料金を確認してください。
-
-権限は対象モデルへの`bedrock:InvokeModel`に限定してください。必要なモデル利用条件を確認し、自分で権限を広げず、利用可能な範囲を管理者に確認します。
-
-## 後片付け
-
-チャットを終了すると実行中の処理はありません。AWS resourceは作らないため、AWS側の削除作業はありません。仮想環境を削除する場合はリポジトリ最上位へ戻り、`sections/s06/.venv`だけを削除します。
-
-Windows PowerShell:
+演習後は、実行中のプログラムを終了します。PowerShellでは次のコマンドで、このターミナルに設定したプロファイルとリージョンを解除できます。
 
 ```powershell
-cd ../..
-if (Test-Path -LiteralPath .\sections\s06\.venv) { Remove-Item -LiteralPath .\sections\s06\.venv -Recurse }
-Test-Path -LiteralPath .\sections\s06\.venv
+Remove-Item Env:AWS_PROFILE -ErrorAction SilentlyContinue
+Remove-Item Env:AWS_DEFAULT_REGION -ErrorAction SilentlyContinue
 ```
-
-最後の結果が`False`なら削除できています。
 
 macOS / Linux:
 
 ```sh
-cd ../..
-if [ -d sections/s06/.venv ]; then rm -r -- sections/s06/.venv; fi
-test ! -e sections/s06/.venv && echo "s06の仮想環境を削除しました"
+unset AWS_PROFILE AWS_DEFAULT_REGION
 ```
 
-必要なら`AWS_PROFILE`、`AWS_DEFAULT_REGION`、`BEDROCK_MODEL_ID`の環境変数を現在のターミナルから解除します。AWS CLIのプロファイルや認証情報は削除しません。
+仮想環境は次の演習でも使えるよう残して構いません。不要になった場合は、リポジトリ最上位からこの演習の`.venv`だけを削除します。
+
+Windows PowerShell:
+
+```powershell
+if (Test-Path -LiteralPath .\sections\s06\l04\.venv) { Remove-Item -LiteralPath .\sections\s06\l04\.venv -Recurse }
+Test-Path -LiteralPath .\sections\s06\l04\.venv
+```
+
+macOS / Linux:
+
+```sh
+if [ -d sections/s06/l04/.venv ]; then rm -r -- sections/s06/l04/.venv; fi
+test ! -e sections/s06/l04/.venv && echo "演習用仮想環境を削除しました"
+```
+
+削除確認が`False`（Windows）または「演習用仮想環境を削除しました」（macOS / Linux）なら、仮想環境は残っていません。`pyproject.toml`と`uv.lock`は依存関係の再現に使うため残します。
 
 ## 参考資料
 
-- [Amazon Bedrock Converse API](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_Converse.html)
-- [Amazon Bedrock Converse APIの概要](https://docs.aws.amazon.com/bedrock/latest/userguide/conversation-inference.html)
-- [Amazon Nova Lite model card](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-amazon-nova-lite.html)
-- [Amazon Bedrock料金表](https://aws.amazon.com/bedrock/pricing/)
+- [Boto3 credentials](https://boto3.amazonaws.com/v1/documentation/api/latest/guide/credentials.html)
+- [AWS SDKs and tools shared config and credentials files](https://docs.aws.amazon.com/sdkref/latest/guide/file-location.html)
+- [AWS CLI: get-caller-identity](https://docs.aws.amazon.com/cli/latest/reference/sts/get-caller-identity.html)
+- [AWS STS API: GetCallerIdentity](https://docs.aws.amazon.com/STS/latest/APIReference/API_GetCallerIdentity.html)
+- [AWS IAM: Service cost information (IAM, IAM Identity Center, and STS)](https://docs.aws.amazon.com/IAM/latest/UserGuide/introduction.html)
+- [AWS CloudShell: features and pricing](https://docs.aws.amazon.com/cloudshell/latest/userguide/welcome.html)
+- [AWS Secrets Manager: Retrieve secrets](https://docs.aws.amazon.com/secretsmanager/latest/userguide/retrieving-secrets.html)
+
+この教材コードはリポジトリのルートにある[MIT License](../../LICENSE)の条件で利用できます。

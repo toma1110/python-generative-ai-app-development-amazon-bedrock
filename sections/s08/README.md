@@ -1,30 +1,22 @@
-# Section 08: 生成AIの出力を評価・改善する
+# Section 08: CLIチャットと会話履歴
 
-この演習では、同じ架空の障害調査メモで変更前後のプロンプトを比べ、出力を原文と照合します。続いて会話履歴の長さを変え、Bedrockが返すtoken利用量と応答時間を観察します。出力の正しさを自動採点せず、事実と未確認事項を自分で見分けて、採用・修正・保留を判断します。
+この演習では、CLIからAmazon Bedrockへ質問し、応答を受け取る小さなチャットを作ります。複数の質問を続けるとき、過去のメッセージを次のリクエストにも含める方法と、含めない方法を比べます。最後に終了操作と、秘密情報を表示しないエラー確認を加えます。
 
 ## 準備
 
-- Python 3.11以降と`uv`
-- AWS CLI v2で設定したプロファイルと有効なログインセッション
-- 使用するリージョンでAmazon Bedrockの推論が利用できること
-- 対象モデルへの`bedrock:InvokeModel`権限
+- Python 3.11以降
+- `uv`
+- AWS CLI v2で設定したAWSプロファイルと有効なログインセッション
+- Amazon Bedrockで利用できるモデル。初期設定は`amazon.nova-lite-v1:0`
+- 対象モデルに対する`bedrock:InvokeModel`権限
 
-この教材をまだ取得していない場合は、作業用フォルダーで公開リポジトリをcloneします。
-
-```text
-git clone https://github.com/toma1110/python-generative-ai-app-development-amazon-bedrock.git
-cd python-generative-ai-app-development-amazon-bedrock
-```
-
-ZIPで取得する場合は、GitHubのCodeメニューから「Download ZIP」を選び、展開したフォルダーを開きます。すでにclone済みの場合は、リポジトリ最上位へ移動してください。
-
-認証情報をコードや`.env`へコピーしません。IAM Identity Centerプロファイルを使う場合は、`<profile-name>`を自分が設定したプロファイル名に置き換えてからログインします。山括弧を含む例をそのままコマンドへ貼り付けないでください。
+認証情報をコードや`.env`へコピーしません。IAM Identity Centerを使う場合は、演習前にログインします。
 
 ```text
 aws sso login --profile <profile-name>
 ```
 
-リポジトリ最上位から、使用するAWSプロファイルとリージョンを設定してください。下の基本手順では`BEDROCK_MODEL_ID`を設定しないため、コードに定義された既定値`amazon.nova-lite-v1:0`を使います。この既定値が対象リージョンとアカウントで使えることを確認してください。別モデルを使う場合は、各環境の任意設定欄だけを使います。そこに書く値は、対象リージョンとアカウントで利用可能な実際のmodel IDへ置き換えてください。placeholderのまま設定しないでください。
+リポジトリの最上位フォルダーで、使うプロファイルとリージョンを設定します。モデルがそのリージョンで利用できることも確認してください。
 
 Windows PowerShell:
 
@@ -33,12 +25,6 @@ $env:AWS_PROFILE = "<profile-name>"
 $env:AWS_DEFAULT_REGION = "ap-northeast-1"
 cd sections/s08
 uv sync
-```
-
-別モデルを使う場合だけ、下の行のコメントを外し、値を利用可能なmodel IDへ置き換えます。基本手順を実行するだけなら設定不要です。
-
-```powershell
-# $env:BEDROCK_MODEL_ID = "実際に利用できるmodel-id"
 ```
 
 macOS / Linux:
@@ -50,80 +36,84 @@ cd sections/s08
 uv sync
 ```
 
-`<profile-name>`は自分のAWS CLIプロファイル名へ置き換えてください。別モデルを使う任意設定はどちらの基本手順にも含めていません。未設定時は`model_id()`がコード内の既定値を返し、有効なmodel IDを任意設定した場合だけその値を使います。
+`uv sync`で、この演習専用の仮想環境にboto3を準備します。認証にはboto3の標準認証情報プロバイダーを使います。必要なら環境変数`BEDROCK_MODEL_ID`で、利用可能な別モデルIDを指定できます。
 
-別モデルを使う場合だけ、下の行のコメントを外し、値を利用可能なmodel IDへ置き換えます。基本手順を実行するだけなら設定不要です。
+## L02: CLIから質問する
 
-```sh
-# export BEDROCK_MODEL_ID="実際に利用できるmodel-id"
+```text
+uv run python s08_l02.py
 ```
 
-## L03: 同じ事例でプロンプト変更前後を比べる
+質問を入力すると、プログラムは`role: "user"`のメッセージを一つ作り、Converse APIを一度呼び出して本文を表示します。表示される文章はモデルが生成するため、実行ごとに変わる場合があります。空の質問を入力するとAPIを呼ばずに終了します。
+
+`converse_turn()`と`s08_l02.py`を見て、CLI入力がメッセージになり、応答本文が表示される流れを追ってください。
+
+処理は次の順です。`input()`が返す文字列を`question`に入れ、`.strip()`で前後の空白を除きます。`if not question`は空文字列かを調べ、空なら`return 0`で`main()`を終えるのでBedrockは呼びません。質問がある場合は`create_client()`がboto3のBedrock Runtime clientを作り、`converse_turn()`へclient、空の履歴`[]`、質問を渡します。`message("user", question)`が次のdictを作ります。
+
+```python
+{"role": "user", "content": [{"text": "入力した質問"}]}
+```
+
+このdictを`messages`というlistに入れてConverse APIへ渡します。APIの戻り値`response`から`output → message → content`をたどり、最初の`text`を`answer`として返します。最後に`print()`がその文字列を表示します。質問、`messages`、応答はそれぞれ別の値です。
+
+## L03: 履歴あり・なしを比べる
+
+履歴ありで起動します。
 
 ```text
 uv run python s08_l03.py
 ```
 
-`sample/incident-note.txt`は教材用の架空データです。比較する前に、`s08_l03.py`の`BASELINE_PROMPT`と`REVISED_PROMPT`を見比べてください。コードはどちらにも同じメモを付けてuserメッセージを作り、順にBedrockへ1回ずつ送ります。
+次の二つの入力を、この順に行います。どちらも架空の設定です。
 
-最初の比較はこの変更です。`BASELINE_PROMPT`は変更前、`REVISED_PROMPT`は変更後の依頼文です。
+```text
+In this fictional demo, my imaginary project code is ORBIT-47. Remember it for this conversation.
+What is my imaginary project code? Answer with the code only. If no code was provided, say you do not know.
+```
+
+`/exit`または`/quit`で終了します。履歴ありでは、2回目のリクエストに最初のuserメッセージ、1回目の実際のassistant応答、2回目のuserメッセージが含まれます。
+
+同じ流れを履歴なしでも試します。
+
+```text
+uv run python s08_l03.py --no-history
+```
+
+同じ二つの入力を、この順にもう一度行います。履歴なしでは、1回目の質問はBedrockへ送られますが、2回目のリクエストには続きの質問だけが含まれます。
+
+2026-11-06に同じ入力をAmazon Nova Liteへ東京リージョンのConverse APIで直接渡した比較（`maxTokens=128`、`temperature=0`）では、履歴ありの2回目は`Your imaginary project code is ORBIT-47.`、履歴なしの2回目は`I do not know.`と返りました。これは一度の比較での実際の応答で、CLIの実行結果ではありません。このCLIでは`temperature`を指定していないため、応答条件は同一ではありません。モデルの応答は実行ごとに変わるため、同じ文面になる保証はありません。履歴なしのモデルが値を推測しても、送信messagesに過去の情報が含まれない点はコードで確かめられます。履歴が長くなると、各回で送る入力token数と料金が増えることにも注目してください。
+
+ここでの`history`は、チャット中だけ使うlistです。`chat()`の最初に`history = []`で空のlistを作り、`while True`の各周回で質問を受け取ります。`converse_turn()`は履歴ありの場合、`messages = [*history, user_message]`で履歴の要素を順に含めた新しいlistを作り、現在の質問のdictを末尾に加えて送ります。2回目の質問なら、送信直前の形は概ね次のようになります。
 
 ```python
-# 変更前
-BASELINE_PROMPT = "この障害調査メモを短く要約してください。"
-
-# 変更後
-REVISED_PROMPT = (
-    "障害調査メモを読み、確認できる事実と未確認事項を分けてください。"
-    "原文にない原因や影響範囲を推測で断定せず、各事実に時刻を添えてください。"
-)
+messages = [
+    {"role": "user", "content": [{"text": "In this fictional demo, my imaginary project code is ORBIT-47. Remember it for this conversation."}]},
+    {"role": "assistant", "content": [{"text": "1回目にモデルが実際に返した応答"}]},
+    {"role": "user", "content": [{"text": "What is my imaginary project code? Answer with the code only. If no code was provided, say you do not know."}]},
+]
 ```
 
-この比較で変えるのはuserメッセージ内の依頼文だけです。架空メモ、systemメッセージ、モデルID、リージョン、出力上限（512 tokens）は固定します。モデルIDとリージョンは準備時に選んだ値を両方の呼び出しで使います。モデルやリージョンまで同時に変えると、出力差がどの変更によるものか判断しにくくなります。
+`role`と`content`を持つ各dictが一つのメッセージです。APIの応答からassistantのメッセージを取り出し、`history.extend((user_message, response["output"]["message"]))`で質問と応答の2つを元の`history`へ追加します。次の周回ではこの更新済み履歴が使われます。履歴なしのときは現在の質問だけを送信し、`history`にも追加しません。Bedrock側にこのCLIの会話状態を保存するのではなく、アプリが次のリクエストに含めています。
 
-コードでは`main()`がsample fileを文字列`case_text`として読み、同じ値を`compare()`へ渡します。`build_user_text()`が依頼文と`case_text`をつなぎ、`message()`がuser messageのdictを作ります。`compare()`は同じsystem指示と設定で2回`converse()`を呼び、1件目の応答を完全に受け取るとその結果を表示してから2件目を呼びます。`response_text(response)`は生成文、`response_metrics(response)`は`input_tokens`、`output_tokens`、`total_tokens`、`latency_ms`を取り出します。これらを`label`と一緒にdictにまとめます。表示文と数値はその場のBedrock実行結果で、READMEやスライドに固定の生成文・実測値はありません。`latency_ms`はBedrock応答内のサービス側の時間で、L03ではクライアント全体の経過時間を測っていません。
-
-二つの出力を実際に読み、原文で裏付けられる事実・時刻、欠けた情報、原文にない原因や影響範囲の断定を比べます。指示どおりの文面になったかだけでは決めず、根拠が保たれ、必要な情報を落とさず、確認できないことを断定しないかを見て採用・修正・保留を選びます。usageと応答時間は出力の品質点ではなく、同じ設定でのコスト・速度の参考値として一緒に記録します。
-
-次に、自分で`REVISED_PROMPT`の依頼文を一か所だけ変えて保存し、同じコマンドをもう一度実行してください。例えば「各事実に時刻を添えてください」を「各事実に時刻を添えて箇条書きで示してください」に変えます。架空メモ、`BASELINE_PROMPT`、systemメッセージ、モデル、リージョン、出力上限は変えません。各実行の中で表示される変更前と変更後を一組として比べ、本文・usage・応答時間を記録します。出力は実行ごとにも変わるため、別の実行どうしの出力差をプロンプト変更だけの効果と決めつけず、どの差が原文で確かめられたかを説明してください。
-
-出力をメモと照合し、少なくとも次を記録してください。
-
-- 原文で裏付けられる記述と、その時刻
-- 原文にない原因や影響範囲の断定がないか
-- 変更を採用・修正・保留する判断と、その根拠
-
-表現や事実の正しさはモデル、実行ごとに変わります。期待文面との一致を合格条件にせず、原文と実際の出力から判断します。
-
-## L04: 応答時間・利用量・会話履歴を見る
-
-まず`--history-turns 2`を指定して実行します。ここで変える条件は次の呼び出しへ渡す会話履歴の上限です。`s08_l04.py`では架空メモ、2つの質問、systemメッセージ、モデルID、リージョン、出力上限を同じにして、別々の実行で`--history-turns 0`と`--history-turns 2`を比べます。二つのコマンドの間でモデルIDやリージョンを変えないでください。
+## L04: 終了と失敗時の確認
 
 ```text
-uv run python s08_l04.py --history-turns 2
+uv run python s08_l04.py
 ```
 
-このプログラムはsampleの架空メモと2つの固定質問だけを使い、各実行でちょうど2回呼び出します。1つ目は「障害メモでは何が分かっていますか」、2つ目は「原因は特定できていますか」です。質問を入力する必要はありません。各質問のuserメッセージにはメモも含まれます。質問1の応答後、コードは質問1のuserメッセージとassistant応答を`history`へ追加し、質問2の直前に`keep_recent_turns`で指定上限の履歴を取り出します。このため固定2問の実行で質問2へ実際に渡る過去の会話は最大1往復です。`2`は将来の質問にも適用する上限であり、今回2往復分の過去履歴があるという意味ではありません。
+`/exit`または`/quit`で終了します。ターミナルで`Ctrl+C`を押すか入力を終了した場合も、tracebackを表示せずチャットを閉じます。
 
-この2問目はメモをもう一度含み、「原因は特定できていますか」と単独で尋ねます。履歴なしでも同じメモから答えられるため、この演習は履歴が回答内容を改善するかを検証しません。履歴あり・なしの実行では、質問2へ送られるメッセージと入力token数などがどう変わるかを観察してください。回答が同じでも異なっても、履歴の有効性や回答品質の差だとは結論づけず、答えの正しさはメモと照合します。
+APIエラー時はエラーコードと、応答に含まれる場合はRequest IDを表示します。AWS接続エラーではプロファイル、ログイン状態、リージョン、ネットワークの確認を案内します。質問と応答は会話画面に表示しますが、アプリケーションのログには記録しません。例外本文や認証情報は画面にもログにも出しません。失敗後も次の質問を入力できます。
 
-`run_turn`は送信するメッセージを組み立てた後、`time.perf_counter()`で`converse`の前後を計り、クライアント側経過時間を出します。応答から本文・token利用量・Bedrock側`metrics.latencyMs`を取り出します。Bedrock側時間とクライアント側時間は計測範囲が違うため、同じ値として扱わないでください。
+`/exit`と`/quit`の判定はAPI呼び出しより前にあります。該当すれば`return 0`で`chat()`を終えます。通常の質問では`try`の中で`converse_turn()`を実行し、失敗すると対応する`except`へ移ります。`_report_error()`はエラーの種類に応じた案内を出し、`continue`で次のwhile周回へ進めます。成功した場合だけ応答を表示し、次の質問へ進みます。入力のEOFやCtrl+Cは終了経路として捕捉します。
 
-値の流れは、`sample_text`と質問から`user_text`（文字列）を作る → `history`（userとassistantのmessage dictを並べたlist）を`request_messages()`で今回の質問に付ける → `run_turn()`がAPI応答から回答・利用量・時間を含むdictを返す、です。応答後にだけ今回の質問と回答を`history`へ追加します。`keep_recent_turns()`は指定した往復数に応じて、履歴listの末尾から完全なuser/assistantペアを選びます。
+ログの設定は`main()`でWARNING以上、形式は`レベル: メッセージ`にしています。`logger.warning()`にはエラーコードや、存在する場合のRequest ID、または例外の型名だけを渡し、質問・応答・例外本文は渡しません。`ClientError`の情報は`error.response`の`Error.Code`と`ResponseMetadata.RequestId`だけを読み取ります。画面へ出す内容とログへ残す内容の違いを確認してください。
 
-今度は履歴を送らずに実行します。
-
-```text
-uv run python s08_l04.py --history-turns 0
-```
-
-同じ2つの質問で実行されます。履歴なしでは2回目のリクエストに直前の質問と応答が入らないことを確認します。`--history-turns 1`なら直近の1往復だけを含めます。履歴を送るほど、同じ質問でも入力token数や料金が増える場合があります。
-
-各応答で、`usage.inputTokens` / `outputTokens` / `totalTokens`、Bedrockの`metrics.latencyMs`、クライアント側の経過時間を表示します。`usage`とBedrock側時間はAPI応答の項目、クライアント側時間はPythonがAPI呼び出しの前後で測った値です。クライアント側には通信等も含まれるため、Bedrock側の時間と同じ指標ではありません。二つの設定で結果を記録し、主に質問2の入力token数と計測時間を比較します。出力の正しさは架空メモと照合しますが、この固定例だけで履歴が回答を改善した、または速度・利用量の差に見合うと判定することはできません。記録にはリージョン、モデル、質問番号、履歴上限を併記します。
+原因を調べるときは、まずAWS CLIのログイン状態とプロファイル、リージョン、モデルの利用可否、IAM権限を確認します。`AccessDeniedException`なら対象モデルに対する`bedrock:InvokeModel`、`ThrottlingException`なら利用状況とクォータを確認し、連続再試行は避けてください。
 
 ## 自動テスト
 
-テストはモック応答を使い、AWSへ接続しません。
+テストはモック応答を使い、AWSへ接続しません。履歴を含むリクエスト、履歴なしのリクエスト、終了操作、エラー表示と会話継続を確認します。
 
 ```text
 uv run python -m unittest discover -s tests -v
@@ -131,29 +121,13 @@ uv run python -m unittest discover -s tests -v
 
 ## 料金と権限
 
-この演習はBedrock Runtimeへの推論のみを行い、AWS resourceを作成しません。L03は1回の実行につき2回、L04も1回の実行につき2回呼び出します。L04で履歴あり・なしを比べる場合は2回実行するため、計4回です。各出力の上限は512 tokensです。通常の比較は計6回で、L03の依頼文を一か所変更してもう一度比較する場合は計8回です。追加の変更や再実行は料金と実行回数を確認してから行ってください。料金はモデル、リージョン、各リクエストの入力token数と出力token数に応じて変わります。実行前に[Amazon Bedrock料金表](https://aws.amazon.com/bedrock/pricing/)で選択したモデルとリージョンの単価を確認し、L04の4応答を含め各API応答に表示された`input_tokens`と`output_tokens`を記録します。単価が1,000 tokensあたりの場合は、各API呼び出しの入力token数と出力token数をそれぞれ1,000で割り、対応する入力単価と出力単価を掛けた金額をすべて足して概算します。料金表の課金単位が異なる場合はそちらに合わせます。実行を繰り返す分も課金対象になり得ます。
+このSectionはBedrock Runtimeへの推論を行い、AWS resourceを作成しません。各有効な質問でAPIを1回呼び、応答上限は128 tokensです。課金はモデル、リージョン、入力・出力token数で変わります。履歴ありでは過去の会話も各リクエストの入力に含まれるため、長く続けるほど入力量が増えます。実行前に[Amazon Bedrock料金表](https://aws.amazon.com/bedrock/pricing/)で対象モデルとリージョンの料金を確認してください。
 
-L04は固定の架空データと質問だけを送ります。コードを変更して任意入力を扱う場合でも、実データ、本番情報、機密情報、個人情報、credentialを入力しないでください。
-
-権限は対象モデルの`bedrock:InvokeModel`に限定します。Converse APIが要求する権限とrequest/response項目は[AWS Converse APIリファレンス](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_Converse.html)を確認してください。モデルの利用条件やリージョン対応はアカウントごとに確認します。
-
-## 想定と異なる場合
-
-- 認証エラー: 使用する`AWS_PROFILE`を確かめ、必要なら`aws sso login --profile <profile-name>`を実行します。
-- 接続が切れ、応答を受け取れなかった: APIが処理を終えたか分からないため、原因とRequest IDが分かる場合は記録し、同じリクエストをすぐ再送しないでください。SDKによる自動再試行は行いません（1リクエストにつき最大1回の送信）。
-- リージョンまたはモデルエラー: `AWS_DEFAULT_REGION`、モデルのリージョン対応、アカウント内の利用条件を確認します。
-- `AccessDeniedException`: 対象モデルに対する`bedrock:InvokeModel`を管理者に確認します。
-- `ThrottlingException`: スクリプトは自動再試行しません。クォータと利用状況を確認し、同じリクエストをもう一度送る必要性を判断してから再実行します。
-- sampleが見つからない: リポジトリ最上位から`sections/s08`で実行していることを確認します。
-- 応答が`end_turn`以外の理由で止まった: その出力は未完了として表示・比較・履歴利用されず、プログラムは停止します。自動再送はしません。`stopReason`と実行回数を記録し、原因を確認してから必要な場合だけ再実行します。
-- 応答にtoken数や時間が`不明`と表示された: その応答の利用量・時間は比較できません。記録では不明とし、AWSへの接続・応答内容を確認してから必要な場合だけ再実行します。
-- `Bedrock APIエラーコード`が表示された: コードとRequest IDだけを記録し、表示された案内に沿ってリージョン、モデル利用可否、IAM権限、クォータを確認します。スクリプトは応答本文や認証情報をエラー表示しません。
-
-エラー画面へ質問や応答、認証情報を出さない設計です。共有するログも秘密情報や個人情報を含まないことを確認してください。
+権限は対象モデルへの`bedrock:InvokeModel`に限定してください。必要なモデル利用条件を確認し、自分で権限を広げず、利用可能な範囲を管理者に確認します。
 
 ## 後片付け
 
-この演習はAWS resourceを作成しません。2つの質問への応答後、プログラムは終了します。仮想環境が不要になったらリポジトリ最上位へ戻り、`sections/s08/.venv`だけを削除します。
+チャットを終了すると実行中の処理はありません。AWS resourceは作らないため、AWS側の削除作業はありません。仮想環境を削除する場合はリポジトリ最上位へ戻り、`sections/s08/.venv`だけを削除します。
 
 Windows PowerShell:
 
@@ -163,7 +137,7 @@ if (Test-Path -LiteralPath .\sections\s08\.venv) { Remove-Item -LiteralPath .\se
 Test-Path -LiteralPath .\sections\s08\.venv
 ```
 
-最後に`False`と表示されれば削除済みです。
+最後の結果が`False`なら削除できています。
 
 macOS / Linux:
 
@@ -173,11 +147,11 @@ if [ -d sections/s08/.venv ]; then rm -r -- sections/s08/.venv; fi
 test ! -e sections/s08/.venv && echo "s08の仮想環境を削除しました"
 ```
 
-必要なら現在のターミナルから`AWS_PROFILE`、`AWS_DEFAULT_REGION`、`BEDROCK_MODEL_ID`だけを解除します。AWS CLIプロファイルや認証情報は削除しません。
+必要なら`AWS_PROFILE`、`AWS_DEFAULT_REGION`、`BEDROCK_MODEL_ID`の環境変数を現在のターミナルから解除します。AWS CLIのプロファイルや認証情報は削除しません。
 
 ## 参考資料
 
-- [Amazon Bedrock Converse API](https://docs.aws.amazon.com/bedrock/latest/userguide/conversation-inference.html)
-- [Converse API response structure](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_Converse.html)
+- [Amazon Bedrock Converse API](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_Converse.html)
+- [Amazon Bedrock Converse APIの概要](https://docs.aws.amazon.com/bedrock/latest/userguide/conversation-inference.html)
+- [Amazon Nova Lite model card](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-amazon-nova-lite.html)
 - [Amazon Bedrock料金表](https://aws.amazon.com/bedrock/pricing/)
-- [Boto3 Bedrock Runtime client](https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/bedrock-runtime.html)

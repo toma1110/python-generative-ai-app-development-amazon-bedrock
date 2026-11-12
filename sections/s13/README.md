@@ -1,58 +1,111 @@
-# Section 13：ファイルとJSONを読み、失敗の原因を確かめる
+# Section 13: 演習用AWSリソースを片付ける
 
-このSectionでは、ファイルの場所を指定して内容を読み、JSONからPythonの値を取り出し、入力の誤りに応じた結果を確認します。演習はPython標準ライブラリだけで実行できます。AWSへの接続や認証情報は必要ありません。
+Section 11で作成したS3演習用バケットと調査メモを、対象を確かめながら削除します。Courseの演習では新しいバケット1個と、その中の`training/s09/incident-note.txt`だけを作成します。Bedrockの推論は永続resourceを作らないため、ここで削除するBedrock resourceはありません。
 
-## 演習を始める
+## 削除前の確認
 
-[演習リポジトリ](https://github.com/toma1110/python-generative-ai-app-development-amazon-bedrock)を開き、どちらかの方法で手元に用意します。
+AWS CLIを使える環境で、Section 11の演習時に記録したprofile、Region、バケット名を用意します。別のターミナルやAWS profileへ切り替えた場合も、同じ値を指定してください。まずアカウントとRegionを確認します。
 
-- Gitを使う場合は、`git clone https://github.com/toma1110/python-generative-ai-app-development-amazon-bedrock.git`を実行します。
-- ZIPを使う場合は、リポジトリ画面の「Code」から「Download ZIP」を選び、展開します。
-
-展開またはcloneしたフォルダーをターミナルで開きます。PathとJSONの演習は既存の[sections/s03/l05のコード](../s03/l05/)を使い、その他の演習は`sections/s13/`内のフォルダーを使います。Pythonのバージョンは3.10以降です。以下の例は`python`コマンドを使います。Windowsで認識されない場合は`py`、macOS/Linuxで認識されない場合は`python3`に読み替えてください。
-
-## 演習の順序
-
-| 順番 | フォルダー | 学ぶこと |
-|---|---|---|
-| 1 | このREADME | ファイルからCLIの結果まで、値が進む段階をつかむ |
-| 2 | [l02](l02/) | 実行前の`SyntaxError`と、実行中の例外を読み分ける |
-| 3 | [sections/s03/l05](../s03/l05/) | `Path`でファイルを読み、JSON文字列をPythonの値にする |
-| 4 | [l04](l04/) | JSON文法の誤りと、アプリが必要とするデータ形状の違いを確かめる |
-| 5 | [l05](l05/) | `raise ValueError`で失敗を知らせ、`try/except`で案内を返す |
-| 6 | [l06](l06/) | 2つの戻り値を受け取り、テストで結果を比べる |
-| 7 | [l07](l07/) | CLIの入力先、表示、プロセスの終了コードを確認する |
-| 8 | このREADME | 失敗した段階と、修正後に確かめる結果を振り返る |
-
-### PathとJSONを読む演習
-
-[sections/s03/l05](../s03/l05/)のプログラムをrepository最上位から実行します。
-
-```text
-python sections/s03/l05/main.py
+```sh
+aws sts get-caller-identity --profile <profile>
+aws configure get region --profile <profile>
+aws s3api get-bucket-location --bucket <bucket> --profile <profile>
 ```
 
-正常時は、API応答・エラーログ・再試行回数の状態が表示されます。ファイルを指定して案内を確認するときは、次のように実行します。
+表示されたアカウントが演習に使ったアカウントであること、バケット名がSection 11で自分が新しく作成したものと完全に一致することを確認します。Regionも作成時のRegionと一致させてください。`get-bucket-location`の結果が`null`なら`us-east-1`、`EU`なら`eu-west-1`です。どれか一つでも確認できない場合は、削除せずに停止します。
 
-```text
-python sections/s03/l05/main.py missing.json
+この演習で作ったバケットに限り、オブジェクト一覧が次の固定keyだけであることを確認します。
+
+```sh
+aws s3api list-objects-v2 --bucket <bucket> --profile <profile> --region <region> --query 'Contents[].Key' --output json
+aws s3api get-bucket-versioning --bucket <bucket> --profile <profile> --region <region> --query Status --output text
 ```
 
-`missing.json`が見つからない案内が表示され、終了コードは1になります。コードの置き場所は移動していないため、REPLの例でも`sections/s03/l05/cases.json`を指定します。
+オブジェクト一覧が`["training/s09/incident-note.txt"]`で、バージョニングの状態が設定なし（CLI出力の`None`）なら次へ進めます。別のkeyが一つでもある、一覧が空、バージョニングが有効または停止状態になっている場合は、この手順で一括削除しません。別のデータや過去のオブジェクトバージョンが含まれる可能性があるため、内容と所有者を確認してください。
 
-ファイル内容が文字列になり、その後JSONからlistへ変わることをREPLで確かめる場合は、repository最上位で`python -X utf8`を実行し、次の行を順に入力します。
+## オブジェクトを削除して確認する
 
-```pycon
->>> from pathlib import Path
->>> path = Path("sections/s03/l05/cases.json")
->>> text = path.read_text(encoding="utf-8")
->>> import json
->>> checks = json.loads(text)
->>> type(checks).__name__
-'list'
->>> exit()
+対象keyだけを削除します。
+
+```sh
+aws s3api delete-object --bucket <bucket> --key training/s09/incident-note.txt --profile <profile> --region <region>
 ```
 
-## 振り返り
+削除後、オブジェクト一覧が空であることを確認します。
 
-入力を調べるときは、ファイルを読めたか、JSON文法を解析できたか、データがアプリの条件を満たすか、CLIがどの結果を表示したかを順に確認します。原因を直した後は、同じ入力とコマンドをもう一度使い、値または案内が期待どおりになったことを確かめます。画面に出るメッセージと、プロセスの終了コードは別々に確認します。
+```sh
+aws s3api list-objects-v2 --bucket <bucket> --profile <profile> --region <region> --query 'Contents[].Key' --output json
+```
+
+空の場合は`[]`または`null`が表示されます。keyが残っている、または一覧を確認できない場合はバケットを削除しません。`delete-object`を実行しても、バージョニングが有効なバケットではdelete markerが作成されるだけの場合があります。バージョニングが有効または停止状態なら、バージョンIDを確認せずに削除を続けないでください。
+
+## 空のバケットを削除して確認する
+
+バケット削除は復元できず、削除した名前を別のAWS利用者が取得できるようになる可能性があります。アカウント、Region、バケット名をもう一度照合し、この演習のために自分で作ったバケットで、オブジェクト一覧が空であることを確認してから実行します。
+
+次のコマンドで空のバケットを削除します。成功した場合、AWSが削除を受け付けたことを確認できます。失敗した場合は削除完了とせず、アカウント、Region、バケット名、権限を調べて停止してください。再実行で解決しようとしないでください。
+
+PowerShell:
+
+```powershell
+aws s3api delete-bucket --bucket <bucket> --profile <profile> --region <region>
+if ($LASTEXITCODE -ne 0) { throw "バケット削除を確認できません。終了コード: $LASTEXITCODE" }
+```
+
+macOS / Linux:
+
+```sh
+if aws s3api delete-bucket --bucket <bucket> --profile <profile> --region <region>; then
+  echo "AWSがバケット削除を受け付けました"
+else
+  echo "バケット削除を確認できません。アカウント、Region、バケット名、権限を調べて停止してください" >&2
+  exit 1
+fi
+```
+
+削除成功後、同じprofileのアカウントが作成時と一致していることを再確認し、アカウント全体のバケット一覧を更新して対象名がないことを確認します。
+
+```sh
+aws sts get-caller-identity --profile <profile>
+aws s3api list-buckets --profile <profile> --query "Buckets[?Name=='<bucket>'].Name" --output json
+```
+
+アカウントIDが一致し、一覧結果が`[]`なら、このアカウントの一覧に対象名がないことを確認できます。対象名が表示される、一覧を取得できない、またはアカウントIDを照合できない場合は削除完了と扱わず、`DeleteBucket`を繰り返さずに管理者へ相談してください。`ListBuckets`はアカウント全体を返すため、Regionで絞り込む操作ではありません。
+
+`HeadBucket`は状況を調べるために実行できますが、削除完了の判定には使いません。
+
+```sh
+aws s3api head-bucket --bucket <bucket> --profile <profile> --region <region>
+```
+
+`HeadBucket`の`400`、`403`、`404`はいずれも、バケットが存在しないこととアクセス上の問題を区別できない場合があります。どの応答も削除の成否を単独では証明しません。`DeleteBucket`が成功していない場合は削除完了とせず、アカウント、Region、バケット名、権限を調べてください。結果が食い違う場合も削除を繰り返さず、状態を確認してください。
+
+## 必要な権限と料金
+
+この手順では対象バケットの`s3:GetBucketLocation`、`s3:GetBucketVersioning`、`s3:ListBucket`、`s3:DeleteObject`、空になったバケットの`s3:DeleteBucket`、削除後の一覧確認に`s3:ListAllMyBuckets`が必要です。必要権限がない場合は、バケット名・Region・必要なactionを管理者へ伝えて相談してください。権限を自分で追加しないでください。
+
+S3の保管、リクエスト、転送には料金が発生する場合があります。演習後に残ったresourceがないか、AWSコンソールでも対象アカウントとRegionを選んで確認してください。Bedrockの推論料金は呼び出しごとに発生し得ますが、削除するresourceはありません。
+
+## ローカル環境
+
+Section 11の実行で作成した`sections/s11/.venv`が不要なら、演習repositoryの最上位でそのdirectoryだけを削除できます。AWS CLI profileや認証情報は削除しません。
+
+PowerShell:
+
+```powershell
+if (Test-Path -LiteralPath .\sections\s11\.venv) { Remove-Item -LiteralPath .\sections\s11\.venv -Recurse }
+Test-Path -LiteralPath .\sections\s11\.venv
+```
+
+macOS / Linux:
+
+```sh
+if [ -d sections/s11/.venv ]; then rm -r -- sections/s11/.venv; fi
+test ! -e sections/s11/.venv && echo "s11の仮想環境を削除しました"
+```
+
+## 参考資料
+
+- [Amazon S3バケットの削除](https://docs.aws.amazon.com/AmazonS3/latest/userguide/delete-bucket.html)
+- [Amazon S3オブジェクトバージョンの削除](https://docs.aws.amazon.com/AmazonS3/latest/userguide/DeletingObjectVersions.html)
+- [Amazon S3料金表](https://aws.amazon.com/s3/pricing/)

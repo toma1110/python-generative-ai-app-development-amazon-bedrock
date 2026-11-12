@@ -1,73 +1,110 @@
-"""Summarize, inspect, or ask about the same note from a local file or S3."""
+"""Read and summarize a local UTF-8 text file with Amazon Bedrock."""
 
-import argparse
-import sys
 from pathlib import Path
+import os
 
-from botocore.exceptions import BotoCoreError, ClientError
-
-from s09_common import ask_model, configure_console, create_bedrock_client, create_s3_client, read_local_text
-from s09_l03 import read_s3_text
-
-SAMPLE_PATH = Path(__file__).parent / "sample" / "incident-note.txt"
-
-
-def load_note(source, path, bucket, key):
-    if source == "local":
-        return read_local_text(path)
-    if not bucket:
-        raise ValueError("S3入力には--bucketまたはS09_BUCKETが必要です。")
-    return read_s3_text(create_s3_client(), bucket, key)
+DEFAULT_MODEL_ID = "amazon.nova-lite-v1:0"
+MAX_OUTPUT_TOKENS = 512
+MAX_INPUT_CHARACTERS = 12000
+SYSTEM_PROMPT = (
+    "あなたは調査メモを日本語で100字程度に要約するアシスタントです。"
+    "メモに書かれた事実だけを使い、原因や復旧状況を推測で補わないでください。"
+    "不明な項目は不明と明記し、対応を指示しないでください。"
+)
 
 
-def main(argv=None):
-    configure_console()
-    parser = argparse.ArgumentParser(description="架空の調査メモを読み、要約・確認項目・追加質問を実行します。")
-    parser.add_argument("--source", choices=("local", "s3"), default="local")
-    parser.add_argument("--path", type=Path, default=SAMPLE_PATH)
-    parser.add_argument("--bucket", default=None)
-    parser.add_argument("--key", default="training/s09/incident-note.txt")
-    parser.add_argument("--task", choices=("summary", "checks", "ask"), default="summary")
-    parser.add_argument("--question", help="--task askで使う追加質問")
-    args = parser.parse_args(argv)
+class EmptyInputError(ValueError):
+    """Raised when a text file contains no usable text."""
+
+
+class InputTooLongError(ValueError):
+    """Raised when a text file exceeds the exercise's input-size guard."""
+
+
+class IncompleteResponseError(ValueError):
+    """Raised when Converse returned without completing a normal answer."""
+
+
+class OutputFileError(ValueError):
+    """Raised when a summary report cannot safely be written."""
+
+
+def validate_output_path(input_path, output_path):
+    """Reject unsafe output targets before creating a model client."""
+    source = Path(input_path)
+    target = Path(output_path)
+    if target.exists():
+        raise OutputFileError("保存先が既にあります。別のファイル名を指定してください。")
+    if not target.parent.is_dir():
+        raise OutputFileError("保存先のフォルダーがありません。先にフォルダーを作成してください。")
     try:
-        note = load_note(args.source, args.path, args.bucket, args.key)
-    except UnicodeDecodeError:
-        if args.source == "s3":
-            details = "指定したS3 objectがUTF-8のテキストか確認してください。"
-        else:
-            details = "--pathで指定した入力ファイルがUTF-8のテキストか確認してください。"
-        print(f"入力の読み込みに失敗しました (UnicodeDecodeError)。{details}", file=sys.stderr)
-        return 1
-    except ValueError as error:
-        print(error, file=sys.stderr)
-        return 1
-    except (BotoCoreError, ClientError, OSError, UnicodeDecodeError) as error:
-        if args.source == "s3":
-            details = "AWS_PROFILEの認証、アカウント、Region、bucket/key、s3:GetObject権限を確認してください。"
-        else:
-            details = "--pathと、入力ファイルがUTF-8のテキストであることを確認してください。"
-        print(f"入力の読み込みに失敗しました ({type(error).__name__})。{details}", file=sys.stderr)
-        return 1
+        if source.samefile(target):
+            raise OutputFileError("入力ファイルと同じ場所には保存できません。別の保存先を指定してください。")
+    except FileNotFoundError:
+        pass
+    return target
 
-    try:
-        result = ask_model(create_bedrock_client(), note, args.task, args.question)
-    except ValueError as error:
-        print(error, file=sys.stderr)
-        return 1
-    except (BotoCoreError, ClientError) as error:
-        print(
-            f"Bedrock推論に失敗しました ({type(error).__name__})。AWS_PROFILEの認証、BEDROCK_MODEL_ID、利用可能なRegion、bedrock:InvokeModel権限とquotaを確認してください。",
-            file=sys.stderr,
+
+def save_summary(input_path, output_path, summary):
+    """Create a UTF-8 Markdown report without replacing an existing file."""
+    target = validate_output_path(input_path, output_path)
+    report = (
+        f"# 要約: {Path(input_path).name}\n\n"
+        f"{summary}\n\n"
+        "> 要約は原文と照合して利用してください。\n"
+    )
+    with target.open("x", encoding="utf-8", newline="\n") as output_file:
+        output_file.write(report)
+    return target
+
+
+def validate_input(text):
+    """Return trimmed input text or raise a clear error for unusable content."""
+    if not isinstance(text, str) or not text.strip():
+        raise EmptyInputError("ファイルの内容が空です。テキストを追加してください。")
+    cleaned = text.strip()
+    if len(cleaned) > MAX_INPUT_CHARACTERS:
+        raise InputTooLongError(f"入力が{MAX_INPUT_CHARACTERS}文字を超えています。短いテキストファイルを指定してください。")
+    return cleaned
+
+
+def read_text_file(path):
+    """Read a UTF-8 text file and reject files containing only whitespace."""
+    text = Path(path).read_text(encoding="utf-8")
+    return validate_input(text)
+
+
+def summarize_text(client, text, model_id=DEFAULT_MODEL_ID):
+    """Send one local text file to Converse and return a completed text answer."""
+    source = validate_input(text)
+    response = client.converse(
+        modelId=model_id,
+        system=[{"text": SYSTEM_PROMPT}],
+        messages=[{"role": "user", "content": [{"text": f"次の調査メモを要約してください。\n\n{source}"}]}],
+        inferenceConfig={"maxTokens": MAX_OUTPUT_TOKENS},
+    )
+    stop_reason = response.get("stopReason")
+    if stop_reason != "end_turn":
+        if stop_reason == "max_tokens":
+            raise IncompleteResponseError(
+                "応答が出力上限で途中終了しました。表示された内容を完成した要約として扱わず、原文を確認してください。"
+            )
+        raise IncompleteResponseError(
+            f"応答が通常完了していません（stopReason: {stop_reason or '不明'}）。要約として扱わず、原文を確認してください。"
         )
-        return 1
-
-    print("## モデルの応答（原文と照合してください）")
-    print(result["text"])
-    print(f"利用量: 入力 {result['input_tokens']} / 出力 {result['output_tokens']} tokens")
-    print(f"Bedrock応答時間: {result['latency_ms']} ms")
-    return 0
+    for block in response["output"]["message"]["content"]:
+        if "text" in block:
+            return block["text"]
+    raise ValueError("応答に要約テキストがありません。")
 
 
-if __name__ == "__main__":
-    raise SystemExit(main())
+def create_client():
+    """Create a Bedrock Runtime client using boto3's standard credential chain."""
+    import boto3
+
+    return boto3.Session().client("bedrock-runtime")
+
+
+def configured_model_id():
+    """Return the optional environment override or the exercise default."""
+    return os.environ.get("BEDROCK_MODEL_ID", DEFAULT_MODEL_ID)

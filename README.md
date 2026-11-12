@@ -13,15 +13,27 @@ Sectionごとの演習は次のとおりです。
 | 学習内容 | 演習 |
 | --- | --- |
 | Python環境と基本構文 | [Section 02](sections/s02/README.md)、[Section 03](sections/s03/README.md) |
-| 関数・モジュール・クラス | [演習README](sections/s12/README.md) |
-| ファイル・JSON・失敗の確認 | [演習README](sections/s13/README.md) |
-| AWS接続とBedrockの呼び出し | [Section 04](sections/s04/README.md)、[Section 05](sections/s05/README.md) |
-| CLI会話とファイル要約 | [Section 06](sections/s06/README.md)、[Section 07](sections/s07/README.md) |
-| 出力の比較と改善 | [Section 08](sections/s08/README.md) |
-| S3入力を含む完成アプリ | [Section 09](sections/s09/README.md) |
-| 演習用AWSリソースの削除 | [Section 10](sections/s10/README.md) |
+| 関数・モジュール・クラス | [Section 04](sections/s04/README.md) |
+| ファイル・JSON・失敗の確認 | [Section 05](sections/s05/README.md) |
+| HTTP・AWS接続 | [Section 06](sections/s06/README.md) |
+| Bedrockを1回呼ぶ | [Section 07](sections/s07/README.md) |
+| CLI会話 | [Section 08](sections/s08/README.md) |
+| ローカルファイル要約 | [Section 09](sections/s09/README.md) |
+| 出力の比較と改善 | [Section 10](sections/s10/README.md) |
+| S3入力を含む完成アプリ | [Section 11](sections/s11/README.md) |
+| 演習用AWSリソースの削除 | [Section 13](sections/s13/README.md) |
 
 各SectionのREADMEから準備、実行、結果確認、料金の確認、後片付けへ進めます。
+
+Course動画から教材を開く場合は、そのLectureで案内される固定版のcommitを取得してください。Gitでcloneした場合は、URLに含まれるcommit SHAを使って次のように切り替えます。
+
+```text
+git clone https://github.com/toma1110/python-generative-ai-app-development-amazon-bedrock.git
+cd python-generative-ai-app-development-amazon-bedrock
+git checkout <commit-sha-from-the-lecture-link>
+```
+
+ZIPを使う場合は、同じcommit SHAを使った`https://github.com/toma1110/python-generative-ai-app-development-amazon-bedrock/archive/<commit-sha-from-the-lecture-link>.zip`を取得してください。最新mainではなく、講義のリソースから開いたGitHub URLにあるSHAを使用します。
 
 ## 実行環境と費用
 

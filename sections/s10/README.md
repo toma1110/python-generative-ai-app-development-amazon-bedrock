@@ -1,111 +1,183 @@
-# Section 10: 演習用AWSリソースを片付ける
+# Section 10: 生成AIの出力を評価・改善する
 
-Section 9で作成したS3演習用バケットと調査メモを、対象を確かめながら削除します。Courseの演習では新しいバケット1個と、その中の`training/s09/incident-note.txt`だけを作成します。Bedrockの推論は永続resourceを作らないため、ここで削除するBedrock resourceはありません。
+この演習では、同じ架空の障害調査メモで変更前後のプロンプトを比べ、出力を原文と照合します。続いて会話履歴の長さを変え、Bedrockが返すtoken利用量と応答時間を観察します。出力の正しさを自動採点せず、事実と未確認事項を自分で見分けて、採用・修正・保留を判断します。
 
-## 削除前の確認
+## 準備
 
-AWS CLIを使える環境で、Section 9の演習時に記録したprofile、Region、バケット名を用意します。別のターミナルやAWS profileへ切り替えた場合も、同じ値を指定してください。まずアカウントとRegionを確認します。
+- Python 3.11以降と`uv`
+- AWS CLI v2で設定したプロファイルと有効なログインセッション
+- 使用するリージョンでAmazon Bedrockの推論が利用できること
+- 対象モデルへの`bedrock:InvokeModel`権限
 
-```sh
-aws sts get-caller-identity --profile <profile>
-aws configure get region --profile <profile>
-aws s3api get-bucket-location --bucket <bucket> --profile <profile>
+この教材をまだ取得していない場合は、作業用フォルダーで公開リポジトリをcloneします。
+
+```text
+git clone https://github.com/toma1110/python-generative-ai-app-development-amazon-bedrock.git
+cd python-generative-ai-app-development-amazon-bedrock
 ```
 
-表示されたアカウントが演習に使ったアカウントであること、バケット名がSection 9で自分が新しく作成したものと完全に一致することを確認します。Regionも作成時のRegionと一致させてください。`get-bucket-location`の結果が`null`なら`us-east-1`、`EU`なら`eu-west-1`です。どれか一つでも確認できない場合は、削除せずに停止します。
+ZIPで取得する場合は、GitHubのCodeメニューから「Download ZIP」を選び、展開したフォルダーを開きます。すでにclone済みの場合は、リポジトリ最上位へ移動してください。
 
-この演習で作ったバケットに限り、オブジェクト一覧が次の固定keyだけであることを確認します。
+認証情報をコードや`.env`へコピーしません。IAM Identity Centerプロファイルを使う場合は、`<profile-name>`を自分が設定したプロファイル名に置き換えてからログインします。山括弧を含む例をそのままコマンドへ貼り付けないでください。
 
-```sh
-aws s3api list-objects-v2 --bucket <bucket> --profile <profile> --region <region> --query 'Contents[].Key' --output json
-aws s3api get-bucket-versioning --bucket <bucket> --profile <profile> --region <region> --query Status --output text
+```text
+aws sso login --profile <profile-name>
 ```
 
-オブジェクト一覧が`["training/s09/incident-note.txt"]`で、バージョニングの状態が設定なし（CLI出力の`None`）なら次へ進めます。別のkeyが一つでもある、一覧が空、バージョニングが有効または停止状態になっている場合は、この手順で一括削除しません。別のデータや過去のオブジェクトバージョンが含まれる可能性があるため、内容と所有者を確認してください。
+リポジトリ最上位から、使用するAWSプロファイルとリージョンを設定してください。下の基本手順では`BEDROCK_MODEL_ID`を設定しないため、コードに定義された既定値`amazon.nova-lite-v1:0`を使います。この既定値が対象リージョンとアカウントで使えることを確認してください。別モデルを使う場合は、各環境の任意設定欄だけを使います。そこに書く値は、対象リージョンとアカウントで利用可能な実際のmodel IDへ置き換えてください。placeholderのまま設定しないでください。
 
-## オブジェクトを削除して確認する
-
-対象keyだけを削除します。
-
-```sh
-aws s3api delete-object --bucket <bucket> --key training/s09/incident-note.txt --profile <profile> --region <region>
-```
-
-削除後、オブジェクト一覧が空であることを確認します。
-
-```sh
-aws s3api list-objects-v2 --bucket <bucket> --profile <profile> --region <region> --query 'Contents[].Key' --output json
-```
-
-空の場合は`[]`または`null`が表示されます。keyが残っている、または一覧を確認できない場合はバケットを削除しません。`delete-object`を実行しても、バージョニングが有効なバケットではdelete markerが作成されるだけの場合があります。バージョニングが有効または停止状態なら、バージョンIDを確認せずに削除を続けないでください。
-
-## 空のバケットを削除して確認する
-
-バケット削除は復元できず、削除した名前を別のAWS利用者が取得できるようになる可能性があります。アカウント、Region、バケット名をもう一度照合し、この演習のために自分で作ったバケットで、オブジェクト一覧が空であることを確認してから実行します。
-
-次のコマンドで空のバケットを削除します。成功した場合、AWSが削除を受け付けたことを確認できます。失敗した場合は削除完了とせず、アカウント、Region、バケット名、権限を調べて停止してください。再実行で解決しようとしないでください。
-
-PowerShell:
+Windows PowerShell:
 
 ```powershell
-aws s3api delete-bucket --bucket <bucket> --profile <profile> --region <region>
-if ($LASTEXITCODE -ne 0) { throw "バケット削除を確認できません。終了コード: $LASTEXITCODE" }
+$env:AWS_PROFILE = "<profile-name>"
+$env:AWS_DEFAULT_REGION = "ap-northeast-1"
+cd sections/s10
+uv sync
+```
+
+別モデルを使う場合だけ、下の行のコメントを外し、値を利用可能なmodel IDへ置き換えます。基本手順を実行するだけなら設定不要です。
+
+```powershell
+# $env:BEDROCK_MODEL_ID = "実際に利用できるmodel-id"
 ```
 
 macOS / Linux:
 
 ```sh
-if aws s3api delete-bucket --bucket <bucket> --profile <profile> --region <region>; then
-  echo "AWSがバケット削除を受け付けました"
-else
-  echo "バケット削除を確認できません。アカウント、Region、バケット名、権限を調べて停止してください" >&2
-  exit 1
-fi
+export AWS_PROFILE="<profile-name>"
+export AWS_DEFAULT_REGION="ap-northeast-1"
+cd sections/s10
+uv sync
 ```
 
-削除成功後、同じprofileのアカウントが作成時と一致していることを再確認し、アカウント全体のバケット一覧を更新して対象名がないことを確認します。
+`<profile-name>`は自分のAWS CLIプロファイル名へ置き換えてください。別モデルを使う任意設定はどちらの基本手順にも含めていません。未設定時は`model_id()`がコード内の既定値を返し、有効なmodel IDを任意設定した場合だけその値を使います。
+
+別モデルを使う場合だけ、下の行のコメントを外し、値を利用可能なmodel IDへ置き換えます。基本手順を実行するだけなら設定不要です。
 
 ```sh
-aws sts get-caller-identity --profile <profile>
-aws s3api list-buckets --profile <profile> --query "Buckets[?Name=='<bucket>'].Name" --output json
+# export BEDROCK_MODEL_ID="実際に利用できるmodel-id"
 ```
 
-アカウントIDが一致し、一覧結果が`[]`なら、このアカウントの一覧に対象名がないことを確認できます。対象名が表示される、一覧を取得できない、またはアカウントIDを照合できない場合は削除完了と扱わず、`DeleteBucket`を繰り返さずに管理者へ相談してください。`ListBuckets`はアカウント全体を返すため、Regionで絞り込む操作ではありません。
+## L03: 同じ事例でプロンプト変更前後を比べる
 
-`HeadBucket`は状況を調べるために実行できますが、削除完了の判定には使いません。
-
-```sh
-aws s3api head-bucket --bucket <bucket> --profile <profile> --region <region>
+```text
+uv run python s10_l03.py
 ```
 
-`HeadBucket`の`400`、`403`、`404`はいずれも、バケットが存在しないこととアクセス上の問題を区別できない場合があります。どの応答も削除の成否を単独では証明しません。`DeleteBucket`が成功していない場合は削除完了とせず、アカウント、Region、バケット名、権限を調べてください。結果が食い違う場合も削除を繰り返さず、状態を確認してください。
+`sample/incident-note.txt`は教材用の架空データです。比較する前に、`s10_l03.py`の`BASELINE_PROMPT`と`REVISED_PROMPT`を見比べてください。コードはどちらにも同じメモを付けてuserメッセージを作り、順にBedrockへ1回ずつ送ります。
 
-## 必要な権限と料金
+最初の比較はこの変更です。`BASELINE_PROMPT`は変更前、`REVISED_PROMPT`は変更後の依頼文です。
 
-この手順では対象バケットの`s3:GetBucketLocation`、`s3:GetBucketVersioning`、`s3:ListBucket`、`s3:DeleteObject`、空になったバケットの`s3:DeleteBucket`、削除後の一覧確認に`s3:ListAllMyBuckets`が必要です。必要権限がない場合は、バケット名・Region・必要なactionを管理者へ伝えて相談してください。権限を自分で追加しないでください。
+```python
+# 変更前
+BASELINE_PROMPT = "この障害調査メモを短く要約してください。"
 
-S3の保管、リクエスト、転送には料金が発生する場合があります。演習後に残ったresourceがないか、AWSコンソールでも対象アカウントとRegionを選んで確認してください。Bedrockの推論料金は呼び出しごとに発生し得ますが、削除するresourceはありません。
+# 変更後
+REVISED_PROMPT = (
+    "障害調査メモを読み、確認できる事実と未確認事項を分けてください。"
+    "原文にない原因や影響範囲を推測で断定せず、各事実に時刻を添えてください。"
+)
+```
 
-## ローカル環境
+この比較で変えるのはuserメッセージ内の依頼文だけです。架空メモ、systemメッセージ、モデルID、リージョン、出力上限（512 tokens）は固定します。モデルIDとリージョンは準備時に選んだ値を両方の呼び出しで使います。モデルやリージョンまで同時に変えると、出力差がどの変更によるものか判断しにくくなります。
 
-Section 9の実行で作成した`sections/s09/.venv`が不要なら、演習repositoryの最上位でそのdirectoryだけを削除できます。AWS CLI profileや認証情報は削除しません。
+コードでは`main()`がsample fileを文字列`case_text`として読み、同じ値を`compare()`へ渡します。`build_user_text()`が依頼文と`case_text`をつなぎ、`message()`がuser messageのdictを作ります。`compare()`は同じsystem指示と設定で2回`converse()`を呼び、1件目の応答を完全に受け取るとその結果を表示してから2件目を呼びます。`response_text(response)`は生成文、`response_metrics(response)`は`input_tokens`、`output_tokens`、`total_tokens`、`latency_ms`を取り出します。これらを`label`と一緒にdictにまとめます。表示文と数値はその場のBedrock実行結果で、READMEやスライドに固定の生成文・実測値はありません。`latency_ms`はBedrock応答内のサービス側の時間で、L03ではクライアント全体の経過時間を測っていません。
 
-PowerShell:
+二つの出力を実際に読み、原文で裏付けられる事実・時刻、欠けた情報、原文にない原因や影響範囲の断定を比べます。指示どおりの文面になったかだけでは決めず、根拠が保たれ、必要な情報を落とさず、確認できないことを断定しないかを見て採用・修正・保留を選びます。usageと応答時間は出力の品質点ではなく、同じ設定でのコスト・速度の参考値として一緒に記録します。
+
+次に、自分で`REVISED_PROMPT`の依頼文を一か所だけ変えて保存し、同じコマンドをもう一度実行してください。例えば「各事実に時刻を添えてください」を「各事実に時刻を添えて箇条書きで示してください」に変えます。架空メモ、`BASELINE_PROMPT`、systemメッセージ、モデル、リージョン、出力上限は変えません。各実行の中で表示される変更前と変更後を一組として比べ、本文・usage・応答時間を記録します。出力は実行ごとにも変わるため、別の実行どうしの出力差をプロンプト変更だけの効果と決めつけず、どの差が原文で確かめられたかを説明してください。
+
+出力をメモと照合し、少なくとも次を記録してください。
+
+- 原文で裏付けられる記述と、その時刻
+- 原文にない原因や影響範囲の断定がないか
+- 変更を採用・修正・保留する判断と、その根拠
+
+表現や事実の正しさはモデル、実行ごとに変わります。期待文面との一致を合格条件にせず、原文と実際の出力から判断します。
+
+## L04: 応答時間・利用量・会話履歴を見る
+
+まず`--history-turns 2`を指定して実行します。ここで変える条件は次の呼び出しへ渡す会話履歴の上限です。`s10_l04.py`では架空メモ、2つの質問、systemメッセージ、モデルID、リージョン、出力上限を同じにして、別々の実行で`--history-turns 0`と`--history-turns 2`を比べます。二つのコマンドの間でモデルIDやリージョンを変えないでください。
+
+```text
+uv run python s10_l04.py --history-turns 2
+```
+
+このプログラムはsampleの架空メモと2つの固定質問だけを使い、各実行でちょうど2回呼び出します。1つ目は「障害メモでは何が分かっていますか」、2つ目は「原因は特定できていますか」です。質問を入力する必要はありません。各質問のuserメッセージにはメモも含まれます。質問1の応答後、コードは質問1のuserメッセージとassistant応答を`history`へ追加し、質問2の直前に`keep_recent_turns`で指定上限の履歴を取り出します。このため固定2問の実行で質問2へ実際に渡る過去の会話は最大1往復です。`2`は将来の質問にも適用する上限であり、今回2往復分の過去履歴があるという意味ではありません。
+
+この2問目はメモをもう一度含み、「原因は特定できていますか」と単独で尋ねます。履歴なしでも同じメモから答えられるため、この演習は履歴が回答内容を改善するかを検証しません。履歴あり・なしの実行では、質問2へ送られるメッセージと入力token数などがどう変わるかを観察してください。回答が同じでも異なっても、履歴の有効性や回答品質の差だとは結論づけず、答えの正しさはメモと照合します。
+
+`run_turn`は送信するメッセージを組み立てた後、`time.perf_counter()`で`converse`の前後を計り、クライアント側経過時間を出します。応答から本文・token利用量・Bedrock側`metrics.latencyMs`を取り出します。Bedrock側時間とクライアント側時間は計測範囲が違うため、同じ値として扱わないでください。
+
+値の流れは、`sample_text`と質問から`user_text`（文字列）を作る → `history`（userとassistantのmessage dictを並べたlist）を`request_messages()`で今回の質問に付ける → `run_turn()`がAPI応答から回答・利用量・時間を含むdictを返す、です。応答後にだけ今回の質問と回答を`history`へ追加します。`keep_recent_turns()`は指定した往復数に応じて、履歴listの末尾から完全なuser/assistantペアを選びます。
+
+今度は履歴を送らずに実行します。
+
+```text
+uv run python s10_l04.py --history-turns 0
+```
+
+同じ2つの質問で実行されます。履歴なしでは2回目のリクエストに直前の質問と応答が入らないことを確認します。`--history-turns 1`なら直近の1往復だけを含めます。履歴を送るほど、同じ質問でも入力token数や料金が増える場合があります。
+
+各応答で、`usage.inputTokens` / `outputTokens` / `totalTokens`、Bedrockの`metrics.latencyMs`、クライアント側の経過時間を表示します。`usage`とBedrock側時間はAPI応答の項目、クライアント側時間はPythonがAPI呼び出しの前後で測った値です。クライアント側には通信等も含まれるため、Bedrock側の時間と同じ指標ではありません。二つの設定で結果を記録し、主に質問2の入力token数と計測時間を比較します。出力の正しさは架空メモと照合しますが、この固定例だけで履歴が回答を改善した、または速度・利用量の差に見合うと判定することはできません。記録にはリージョン、モデル、質問番号、履歴上限を併記します。
+
+## 自動テスト
+
+テストはモック応答を使い、AWSへ接続しません。
+
+```text
+uv run python -m unittest discover -s tests -v
+```
+
+## 料金と権限
+
+この演習はBedrock Runtimeへの推論のみを行い、AWS resourceを作成しません。L03は1回の実行につき2回、L04も1回の実行につき2回呼び出します。L04で履歴あり・なしを比べる場合は2回実行するため、計4回です。各出力の上限は512 tokensです。通常の比較は計6回で、L03の依頼文を一か所変更してもう一度比較する場合は計8回です。追加の変更や再実行は料金と実行回数を確認してから行ってください。料金はモデル、リージョン、各リクエストの入力token数と出力token数に応じて変わります。実行前に[Amazon Bedrock料金表](https://aws.amazon.com/bedrock/pricing/)で選択したモデルとリージョンの単価を確認し、L04の4応答を含め各API応答に表示された`input_tokens`と`output_tokens`を記録します。単価が1,000 tokensあたりの場合は、各API呼び出しの入力token数と出力token数をそれぞれ1,000で割り、対応する入力単価と出力単価を掛けた金額をすべて足して概算します。料金表の課金単位が異なる場合はそちらに合わせます。実行を繰り返す分も課金対象になり得ます。
+
+L04は固定の架空データと質問だけを送ります。コードを変更して任意入力を扱う場合でも、実データ、本番情報、機密情報、個人情報、credentialを入力しないでください。
+
+権限は対象モデルの`bedrock:InvokeModel`に限定します。Converse APIが要求する権限とrequest/response項目は[AWS Converse APIリファレンス](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_Converse.html)を確認してください。モデルの利用条件やリージョン対応はアカウントごとに確認します。
+
+## 想定と異なる場合
+
+- 認証エラー: 使用する`AWS_PROFILE`を確かめ、必要なら`aws sso login --profile <profile-name>`を実行します。
+- 接続が切れ、応答を受け取れなかった: APIが処理を終えたか分からないため、原因とRequest IDが分かる場合は記録し、同じリクエストをすぐ再送しないでください。SDKによる自動再試行は行いません（1リクエストにつき最大1回の送信）。
+- リージョンまたはモデルエラー: `AWS_DEFAULT_REGION`、モデルのリージョン対応、アカウント内の利用条件を確認します。
+- `AccessDeniedException`: 対象モデルに対する`bedrock:InvokeModel`を管理者に確認します。
+- `ThrottlingException`: スクリプトは自動再試行しません。クォータと利用状況を確認し、同じリクエストをもう一度送る必要性を判断してから再実行します。
+- sampleが見つからない: リポジトリ最上位から`sections/s10`で実行していることを確認します。
+- 応答が`end_turn`以外の理由で止まった: その出力は未完了として表示・比較・履歴利用されず、プログラムは停止します。自動再送はしません。`stopReason`と実行回数を記録し、原因を確認してから必要な場合だけ再実行します。
+- 応答にtoken数や時間が`不明`と表示された: その応答の利用量・時間は比較できません。記録では不明とし、AWSへの接続・応答内容を確認してから必要な場合だけ再実行します。
+- `Bedrock APIエラーコード`が表示された: コードとRequest IDだけを記録し、表示された案内に沿ってリージョン、モデル利用可否、IAM権限、クォータを確認します。スクリプトは応答本文や認証情報をエラー表示しません。
+
+エラー画面へ質問や応答、認証情報を出さない設計です。共有するログも秘密情報や個人情報を含まないことを確認してください。
+
+## 後片付け
+
+この演習はAWS resourceを作成しません。2つの質問への応答後、プログラムは終了します。仮想環境が不要になったらリポジトリ最上位へ戻り、`sections/s10/.venv`だけを削除します。
+
+Windows PowerShell:
 
 ```powershell
-if (Test-Path -LiteralPath .\sections\s09\.venv) { Remove-Item -LiteralPath .\sections\s09\.venv -Recurse }
-Test-Path -LiteralPath .\sections\s09\.venv
+cd ../..
+if (Test-Path -LiteralPath .\sections\s10\.venv) { Remove-Item -LiteralPath .\sections\s10\.venv -Recurse }
+Test-Path -LiteralPath .\sections\s10\.venv
 ```
+
+最後に`False`と表示されれば削除済みです。
 
 macOS / Linux:
 
 ```sh
-if [ -d sections/s09/.venv ]; then rm -r -- sections/s09/.venv; fi
-test ! -e sections/s09/.venv && echo "s09の仮想環境を削除しました"
+cd ../..
+if [ -d sections/s10/.venv ]; then rm -r -- sections/s10/.venv; fi
+test ! -e sections/s10/.venv && echo "s10の仮想環境を削除しました"
 ```
+
+必要なら現在のターミナルから`AWS_PROFILE`、`AWS_DEFAULT_REGION`、`BEDROCK_MODEL_ID`だけを解除します。AWS CLIプロファイルや認証情報は削除しません。
 
 ## 参考資料
 
-- [Amazon S3バケットの削除](https://docs.aws.amazon.com/AmazonS3/latest/userguide/delete-bucket.html)
-- [Amazon S3オブジェクトバージョンの削除](https://docs.aws.amazon.com/AmazonS3/latest/userguide/DeletingObjectVersions.html)
-- [Amazon S3料金表](https://aws.amazon.com/s3/pricing/)
+- [Amazon Bedrock Converse API](https://docs.aws.amazon.com/bedrock/latest/userguide/conversation-inference.html)
+- [Converse API response structure](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_Converse.html)
+- [Amazon Bedrock料金表](https://aws.amazon.com/bedrock/pricing/)
+- [Boto3 Bedrock Runtime client](https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/bedrock-runtime.html)

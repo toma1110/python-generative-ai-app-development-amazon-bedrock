@@ -1,241 +1,365 @@
+import tempfile
 import unittest
-import os
-import subprocess
-import sys
-from io import BytesIO, StringIO
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
 from pathlib import Path
-from unittest.mock import Mock, patch
-from botocore.exceptions import BotoCoreError, ClientError
 
-from s09_app import load_note, main
-from s09_common import IncompleteResponseError, ask_model, create_bedrock_client, response_metrics
-from s09_l02 import OBJECT_KEY, prepare_bucket
-from s09_l03 import read_s3_text
-from s09_l06 import BASELINE_PROMPT, REVISED_PROMPT, compare, main as s09_l06_main
+from s09_app import EmptyInputError, IncompleteResponseError, InputTooLongError, read_text_file, save_summary, summarize_text, validate_input
+from s09_l02 import main as l02_main
+from s09_l04 import main as l04_main
 
-
-def response(text="応答", stop_reason="end_turn"):
-    return {
-        "output": {"message": {"content": [{"text": text}]}},
-        "usage": {"inputTokens": 11, "outputTokens": 7},
-        "metrics": {"latencyMs": 100},
-        "stopReason": stop_reason,
-    }
+TEST_INPUT = "この文章はテスト用に用意した架空の調査メモ本文です。入力境界も併せて確認します。"
+MAX_INPUT_CHARACTERS = 12000
 
 
-class Section09Tests(unittest.TestCase):
-    def test_cli_help_uses_utf8_even_when_parent_encoding_is_cp1252(self):
-        section_dir = Path(__file__).resolve().parents[1]
-        env = os.environ.copy()
-        env["PYTHONIOENCODING"] = "cp1252"
-        for script in ("s09_app.py", "s09_l02.py", "s09_l03.py", "s09_l06.py"):
-            with self.subTest(script=script):
-                result = subprocess.run(
-                    [sys.executable, str(section_dir / script), "--help"],
-                    cwd=section_dir.parents[1],
-                    env=env,
-                    capture_output=True,
-                    check=False,
-                )
-                self.assertEqual(result.returncode, 0, result.stderr.decode("utf-8", errors="replace"))
-                self.assertIn("usage:", result.stdout.decode("utf-8"))
+class FakeClient:
+    def __init__(self, response=None):
+        self.calls = []
+        self.response = response or {
+            "stopReason": "end_turn",
+            "output": {"message": {"content": [{"text": "確認できた事実の要約です。"}]}}
+        }
 
-    def test_setup_creates_only_requested_bucket_and_fixed_object(self):
-        s3 = Mock()
-        s3.head_bucket.side_effect = ClientError(
-            {"Error": {"Code": "404"}, "ResponseMetadata": {"HTTPStatusCode": 404}}, "HeadBucket"
-        )
-        self.assertEqual(prepare_bucket(s3, "example-unique-bucket", "us-west-2", b"memo"), OBJECT_KEY)
-        s3.create_bucket.assert_called_once_with(
-            Bucket="example-unique-bucket", CreateBucketConfiguration={"LocationConstraint": "us-west-2"}
-        )
-        s3.put_object.assert_called_once_with(
-            Bucket="example-unique-bucket", Key=OBJECT_KEY, Body=b"memo", ContentType="text/plain; charset=utf-8"
-        )
+    def converse(self, **kwargs):
+        self.calls.append(kwargs)
+        return self.response
 
-    def test_setup_refuses_existing_bucket_without_writing(self):
-        s3 = Mock()
-        s3.head_bucket.return_value = {}
-        with self.assertRaisesRegex(ValueError, "既に存在"):
-            prepare_bucket(s3, "existing", "us-east-1", b"memo")
-        s3.create_bucket.assert_not_called()
-        s3.put_object.assert_not_called()
 
-    def test_s3_read_uses_exact_bucket_and_key_and_closes_body(self):
-        body = BytesIO("架空メモ".encode())
-        s3 = Mock()
-        s3.get_object.return_value = {"Body": body}
-        self.assertEqual(read_s3_text(s3, "demo-bucket", OBJECT_KEY), "架空メモ")
-        s3.get_object.assert_called_once_with(Bucket="demo-bucket", Key=OBJECT_KEY)
-        self.assertTrue(body.closed)
+class FileInputTests(unittest.TestCase):
+    def test_save_summary_writes_utf8_markdown_with_input_basename(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "調査メモ.txt"
+            source.write_text(TEST_INPUT, encoding="utf-8")
+            output = Path(directory) / "report.md"
 
-    def test_local_and_s3_are_loaded_through_one_app_entry_point(self):
-        from pathlib import Path
-        from tempfile import TemporaryDirectory
+            saved = save_summary(source, output, "確認できた事実の要約です。")
 
-        with TemporaryDirectory() as directory:
+            self.assertEqual(saved, output)
+            self.assertEqual(
+                output.read_bytes().decode("utf-8"),
+                "# 要約: 調査メモ.txt\n\n確認できた事実の要約です。\n\n> 要約は原文と照合して利用してください。\n",
+            )
+
+    def test_save_summary_does_not_replace_existing_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "memo.txt"
+            output = Path(directory) / "report.md"
+            source.write_text(TEST_INPUT, encoding="utf-8")
+            output.write_text("keep", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "既にあります"):
+                save_summary(source, output, "new")
+
+            self.assertEqual(output.read_text(encoding="utf-8"), "keep")
+
+    def test_l02_saves_fake_summary_and_default_mode_keeps_stdout(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "memo.txt"
+            output = Path(directory) / "report.md"
+            source.write_text(TEST_INPUT, encoding="utf-8")
+            fake = FakeClient()
+            stdout = StringIO()
+            from unittest.mock import patch
+
+            with patch("s09_l02.create_client", return_value=fake), redirect_stdout(stdout):
+                result = l02_main(["--file", str(source), "--output", str(output)])
+
+            self.assertEqual(result, 0)
+            self.assertEqual(len(fake.calls), 1)
+            self.assertIn("# 要約: memo.txt", output.read_text(encoding="utf-8"))
+            self.assertIn("要約を保存しました", stdout.getvalue())
+
+            stdout = StringIO()
+            with patch("s09_l02.create_client", return_value=FakeClient()), redirect_stdout(stdout):
+                result = l02_main(["--file", str(source)])
+
+            self.assertEqual(result, 0)
+            self.assertIn("要約（原文と照合して利用してください）:", stdout.getvalue())
+            self.assertIn("確認できた事実の要約です。", stdout.getvalue())
+
+    def test_known_invalid_output_stops_before_client_creation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "memo.txt"
+            output = Path(directory) / "existing.md"
+            source.write_text(TEST_INPUT, encoding="utf-8")
+            output.write_text("keep", encoding="utf-8")
+            error_output = StringIO()
+            from unittest.mock import patch
+
+            with patch("s09_l02.create_client") as create_client, redirect_stderr(error_output):
+                result = l02_main(["--file", str(source), "--output", str(output)])
+
+            self.assertEqual(result, 2)
+            self.assertIn("既にあります", error_output.getvalue())
+            create_client.assert_not_called()
+            self.assertEqual(output.read_text(encoding="utf-8"), "keep")
+
+    def test_input_file_cannot_be_used_as_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "memo.txt"
+            source.write_text(TEST_INPUT, encoding="utf-8")
+            error_output = StringIO()
+            from unittest.mock import patch
+
+            with patch("s09_l02.create_client") as create_client, redirect_stderr(error_output):
+                result = l02_main(["--file", str(source), "--output", str(source)])
+
+            self.assertEqual(result, 2)
+            self.assertIn("既にあります", error_output.getvalue())
+            create_client.assert_not_called()
+            self.assertEqual(source.read_text(encoding="utf-8"), TEST_INPUT)
+
+    def test_missing_output_parent_stops_before_client_creation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "memo.txt"
+            source.write_text(TEST_INPUT, encoding="utf-8")
+            output = Path(directory) / "missing" / "report.md"
+            error_output = StringIO()
+            from unittest.mock import patch
+
+            with patch("s09_l02.create_client") as create_client, redirect_stderr(error_output):
+                result = l02_main(["--file", str(source), "--output", str(output)])
+
+            self.assertEqual(result, 2)
+            self.assertIn("フォルダーがありません", error_output.getvalue())
+            create_client.assert_not_called()
+            self.assertFalse(output.parent.exists())
+
+    def test_api_failure_does_not_create_report(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "memo.txt"
+            output = Path(directory) / "report.md"
+            source.write_text(TEST_INPUT, encoding="utf-8")
+            fake = FakeClient({"stopReason": "max_tokens", "output": {"message": {"content": [{"text": "途中"}]}}})
+            error_output = StringIO()
+            from unittest.mock import patch
+
+            with patch("s09_l02.create_client", return_value=fake), redirect_stderr(error_output):
+                result = l02_main(["--file", str(source), "--output", str(output)])
+
+            self.assertEqual(result, 1)
+            self.assertIn("途中終了", error_output.getvalue())
+            self.assertFalse(output.exists())
+
+    def test_write_failure_is_reported_without_success_message(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "memo.txt"
+            output = Path(directory) / "report.md"
+            source.write_text(TEST_INPUT, encoding="utf-8")
+            fake = FakeClient()
+            error_output = StringIO()
+            stdout = StringIO()
+            from unittest.mock import patch
+
+            with patch("s09_l02.create_client", return_value=fake), patch("s09_l02.save_summary", side_effect=OSError("disk full")), redirect_stderr(error_output), redirect_stdout(stdout):
+                result = l02_main(["--file", str(source), "--output", str(output)])
+
+            self.assertEqual(result, 1)
+            self.assertIn("disk full", error_output.getvalue())
+            self.assertNotIn("保存しました", stdout.getvalue())
+            self.assertFalse(output.exists())
+
+    def test_partial_write_failure_is_reported_and_partial_file_is_preserved(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "memo.txt"
+            output = Path(directory) / "report.md"
+            source.write_text(TEST_INPUT, encoding="utf-8")
+            fake = FakeClient()
+            error_output = StringIO()
+            stdout = StringIO()
+            from unittest.mock import patch
+
+            original_open = Path.open
+
+            class PartialWriter:
+                def __init__(self, stream):
+                    self.stream = stream
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, exc_type, exc_value, traceback):
+                    self.stream.close()
+                    return False
+
+                def write(self, content):
+                    self.stream.write(content[:12])
+                    self.stream.flush()
+                    raise OSError("disk full")
+
+            def open_with_partial_failure(path, *args, **kwargs):
+                if path == output:
+                    return PartialWriter(original_open(path, *args, **kwargs))
+                return original_open(path, *args, **kwargs)
+
+            with patch("s09_l02.create_client", return_value=fake), patch.object(Path, "open", open_with_partial_failure), redirect_stderr(error_output), redirect_stdout(stdout):
+                result = l02_main(["--file", str(source), "--output", str(output)])
+
+            self.assertEqual(result, 1)
+            self.assertIn("disk full", error_output.getvalue())
+            self.assertIn("空き容量", error_output.getvalue())
+            self.assertIn("不完全なファイルが残っている場合", error_output.getvalue())
+            self.assertIn("別のファイル名", error_output.getvalue())
+            self.assertNotIn("保存しました", stdout.getvalue())
+            self.assertTrue(output.exists())
+            self.assertEqual(output.read_text(encoding="utf-8"), "# 要約: memo.t")
+
+    def test_reads_utf8_text_and_trims_outer_whitespace(self):
+        with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "memo.txt"
-            path.write_text("local memo", encoding="utf-8")
-            self.assertEqual(load_note("local", path, None, OBJECT_KEY), "local memo")
+            path.write_text(f"\n{TEST_INPUT}\n", encoding="utf-8")
 
-    def test_s3_read_failure_reports_input_help_and_skips_bedrock(self):
-        error = ClientError(
-            {"Error": {"Code": "AccessDenied", "Message": "private detail"}}, "GetObject"
-        )
-        stderr = StringIO()
-        with (
-            patch("s09_app.load_note", side_effect=error),
-            patch("s09_app.create_bedrock_client") as create_client,
-            patch("s09_app.ask_model") as invoke_model,
-            patch("s09_app.sys.stderr", stderr),
-        ):
-            self.assertEqual(main(["--source", "s3", "--bucket", "demo-bucket"]), 1)
-        self.assertIn("入力の読み込みに失敗しました (ClientError)", stderr.getvalue())
-        self.assertIn("bucket/key、s3:GetObject権限", stderr.getvalue())
-        self.assertNotIn("private detail", stderr.getvalue())
-        create_client.assert_not_called()
-        invoke_model.assert_not_called()
+            self.assertEqual(read_text_file(path), TEST_INPUT)
 
-    def test_invalid_utf8_input_does_not_print_decode_exception_details(self):
-        error = UnicodeDecodeError("utf-8", b"private bytes", 0, 1, "invalid start byte")
-        stderr = StringIO()
-        with (
-            patch("s09_app.load_note", side_effect=error),
-            patch("s09_app.create_bedrock_client") as create_client,
-            patch("s09_app.ask_model") as invoke_model,
-            patch("s09_app.sys.stderr", stderr),
-        ):
-            self.assertEqual(main(["--source", "s3", "--bucket", "demo-bucket"]), 1)
-        self.assertIn("入力の読み込みに失敗しました (UnicodeDecodeError)", stderr.getvalue())
-        self.assertIn("UTF-8のテキスト", stderr.getvalue())
-        self.assertNotIn("private bytes", stderr.getvalue())
-        create_client.assert_not_called()
-        invoke_model.assert_not_called()
+    def test_rejects_blank_input(self):
+        with self.assertRaises(EmptyInputError):
+            validate_input(" \n\t ")
 
-    def test_bedrock_client_creation_failure_reports_inference_help(self):
-        stderr = StringIO()
-        with (
-            patch("s09_app.load_note", return_value="memo"),
-            patch("s09_app.create_bedrock_client", side_effect=BotoCoreError(error_msg="private detail")),
-            patch("s09_app.ask_model") as invoke_model,
-            patch("s09_app.sys.stderr", stderr),
-        ):
-            self.assertEqual(main(["--source", "local"]), 1)
-        self.assertIn("Bedrock推論に失敗しました (BotoCoreError)", stderr.getvalue())
-        self.assertIn("BEDROCK_MODEL_ID", stderr.getvalue())
-        self.assertIn("bedrock:InvokeModel", stderr.getvalue())
-        self.assertNotIn("private detail", stderr.getvalue())
-        invoke_model.assert_not_called()
+    def test_accepts_one_character_after_trimming(self):
+        self.assertEqual(validate_input("  x  "), "x")
 
-    def test_converse_failure_reports_inference_help_without_response_body(self):
-        error = ClientError(
-            {"Error": {"Code": "AccessDeniedException", "Message": "private response body"}}, "Converse"
-        )
-        stderr = StringIO()
-        with (
-            patch("s09_app.load_note", return_value="memo"),
-            patch("s09_app.create_bedrock_client", return_value=Mock()),
-            patch("s09_app.ask_model", side_effect=error),
-            patch("s09_app.sys.stderr", stderr),
-        ):
-            self.assertEqual(main(["--source", "local"]), 1)
-        self.assertIn("Bedrock推論に失敗しました (ClientError)", stderr.getvalue())
-        self.assertIn("BEDROCK_MODEL_ID", stderr.getvalue())
-        self.assertNotIn("private response body", stderr.getvalue())
-        self.assertNotIn("入力の読み込みに失敗", stderr.getvalue())
+    def test_accepts_input_at_the_maximum_length(self):
+        text = "x" * MAX_INPUT_CHARACTERS
+        self.assertEqual(validate_input(text), text)
 
-    def test_incomplete_model_response_is_reported_without_traceback(self):
-        stderr = StringIO()
-        with (
-            patch("s09_app.load_note", return_value="memo"),
-            patch("s09_app.create_bedrock_client", return_value=Mock()),
-            patch("s09_app.ask_model", side_effect=IncompleteResponseError("max_tokens")),
-            patch("s09_app.sys.stderr", stderr),
-        ):
-            self.assertEqual(main(["--source", "local"]), 1)
-        self.assertIn("stopReason: max_tokens", stderr.getvalue())
-        self.assertIn("自動再送もしない", stderr.getvalue())
-        self.assertNotIn("Traceback", stderr.getvalue())
+    def test_accepts_input_below_the_maximum_length(self):
+        text = "x" * (MAX_INPUT_CHARACTERS - 1)
+        self.assertEqual(validate_input(text), text)
 
-    def test_model_request_reports_text_usage_and_safe_system_instruction(self):
-        client = Mock()
-        client.converse.return_value = response("要約")
-        result = ask_model(client, "架空メモ", "summary")
-        request = client.converse.call_args.kwargs
-        self.assertEqual(result, {
-            "text": "要約", "input_tokens": 11, "output_tokens": 7,
-            "latency_ms": 100, "stop_reason": "end_turn",
-        })
+    def test_rejects_input_above_the_exercise_limit(self):
+        with self.assertRaises(InputTooLongError):
+            validate_input("x" * (MAX_INPUT_CHARACTERS + 1))
+
+    def test_l04_accepts_short_meaningful_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "short.txt"
+            path.write_text("x", encoding="utf-8")
+            output = StringIO()
+
+            with redirect_stdout(output):
+                result = l04_main(["--file", str(path)])
+
+        self.assertEqual(result, 0)
+        self.assertIn("1文字の入力を読み込みました", output.getvalue())
+
+    def test_l04_reports_blank_file_without_traceback(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "blank.txt"
+            path.write_text(" \n", encoding="utf-8")
+            error_output = StringIO()
+
+            with redirect_stderr(error_output):
+                result = l04_main(["--file", str(path)])
+
+        self.assertEqual(result, 2)
+        self.assertIn("内容が空", error_output.getvalue())
+        self.assertNotIn("Traceback", error_output.getvalue())
+
+    def test_l04_reports_oversized_file_without_traceback(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "long.txt"
+            path.write_text("x" * (MAX_INPUT_CHARACTERS + 1), encoding="utf-8")
+            error_output = StringIO()
+
+            with redirect_stderr(error_output):
+                result = l04_main(["--file", str(path)])
+
+        self.assertEqual(result, 2)
+        self.assertIn("12000文字", error_output.getvalue())
+        self.assertNotIn("Traceback", error_output.getvalue())
+
+    def test_missing_file_is_distinct_from_blank_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            missing = Path(directory) / "missing.txt"
+            blank = Path(directory) / "blank.txt"
+            blank.write_text(" \n", encoding="utf-8")
+
+            with self.assertRaises(FileNotFoundError):
+                read_text_file(missing)
+            with self.assertRaises(EmptyInputError):
+                read_text_file(blank)
+
+    def test_rejects_non_utf8_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "invalid.txt"
+            path.write_bytes(b"\xff\xfe")
+
+            with self.assertRaises(UnicodeDecodeError):
+                read_text_file(path)
+
+    def test_summary_uses_file_text_and_a_bounded_converse_request(self):
+        client = FakeClient()
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "memo.txt"
+            path.write_text(f"  {TEST_INPUT}  ", encoding="utf-8")
+            source = read_text_file(path)
+        result = summarize_text(client, source)
+
+        self.assertEqual(result, "確認できた事実の要約です。")
+        self.assertEqual(len(client.calls), 1)
+        request = client.calls[0]
+        self.assertEqual(request["modelId"], "amazon.nova-lite-v1:0")
         self.assertEqual(request["inferenceConfig"]["maxTokens"], 512)
-        self.assertIn("断定しません", request["system"][0]["text"])
-        self.assertIn("架空メモ", request["messages"][0]["content"][0]["text"])
+        self.assertIn("日本語で100字程度", request["system"][0]["text"])
+        self.assertEqual(request["messages"][0]["content"][0]["text"], f"次の調査メモを要約してください。\n\n{TEST_INPUT}")
 
-    def test_bedrock_client_disables_sdk_retries(self):
-        session = Mock()
-        with patch("s09_common.boto3.Session", return_value=session):
-            create_bedrock_client()
-        config = session.client.call_args.kwargs["config"]
-        self.assertEqual(config.retries["total_max_attempts"], 1)
-
-    def test_incomplete_response_is_rejected_without_retry(self):
-        client = Mock()
-        client.converse.return_value = response("途中の文", stop_reason="max_tokens")
-        with self.assertRaisesRegex(IncompleteResponseError, "max_tokens"):
-            ask_model(client, "架空メモ", "summary")
-        client.converse.assert_called_once()
-
-    def test_comparison_uses_identical_note_with_two_different_prompts(self):
-        client = Mock()
-        client.converse.side_effect = [response("前"), response("後")]
-        results = list(compare(client, "same note"))
-        self.assertNotEqual(BASELINE_PROMPT, REVISED_PROMPT)
-        self.assertEqual(client.converse.call_count, 2)
-        self.assertEqual(
-            [call.kwargs["messages"][0]["content"][0]["text"].split("--- 調査メモ ---\n", 1)[1]
-             for call in client.converse.call_args_list],
-            ["same note", "same note"],
-        )
-        self.assertEqual(
-            [label for label, _ in results],
-            ["BASELINE（既存の短い要約指示）", "REVISED（編集対象の指示）"],
-        )
-
-    def test_missing_metrics_are_reported_as_unknown(self):
-        self.assertEqual(response_metrics({}), {
-            "input_tokens": "不明", "output_tokens": "不明",
-            "latency_ms": "不明", "stop_reason": "不明",
+    def test_max_tokens_response_is_not_returned_as_a_complete_summary(self):
+        client = FakeClient({
+            "stopReason": "max_tokens",
+            "output": {"message": {"content": [{"text": "途中までの出力"}]}},
         })
 
-    def test_first_complete_result_is_printed_and_kept_if_second_call_is_incomplete(self):
-        output = StringIO()
-        error_output = StringIO()
-        client = Mock()
-        call_count = 0
+        with self.assertRaisesRegex(IncompleteResponseError, "出力上限で途中終了"):
+            summarize_text(client, TEST_INPUT)
 
-        def ask_once(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 2:
-                self.assertIn("## BASELINE（既存の短い要約指示）", output.getvalue())
-                self.assertIn("最初の回答", output.getvalue())
-                raise IncompleteResponseError("max_tokens")
-            return {
-                "text": "最初の回答",
-                "input_tokens": 11, "output_tokens": 7,
-                "latency_ms": 100, "stop_reason": "end_turn",
-            }
+        self.assertEqual(len(client.calls), 1)
 
-        with (
-            patch("s09_l06.load_note", return_value="same note"),
-            patch("s09_l06.create_bedrock_client", return_value=client),
-            patch("s09_l06.ask_model", side_effect=ask_once),
-            patch("s09_l06.sys.stdout", output),
-            patch("s09_l06.sys.stderr", error_output),
-        ):
-            self.assertEqual(s09_l06_main(["--source", "local"]), 1)
-        self.assertEqual(call_count, 2)
-        self.assertIn("最初の回答", output.getvalue())
-        self.assertIn("stopReason: max_tokens", error_output.getvalue())
+    def test_response_without_text_is_distinguished_from_completed_summary(self):
+        client = FakeClient({
+            "stopReason": "end_turn",
+            "output": {"message": {"content": [{"image": {"format": "png", "source": {}}}]}},
+        })
+
+        with self.assertRaisesRegex(ValueError, "応答に要約テキストがありません"):
+            summarize_text(client, TEST_INPUT)
+
+    def test_empty_input_does_not_call_the_model(self):
+        client = FakeClient()
+
+        with self.assertRaises(EmptyInputError):
+            summarize_text(client, "")
+
+        self.assertEqual(client.calls, [])
+
+    def test_short_meaningful_input_is_sent_to_the_stub(self):
+        client = FakeClient()
+
+        result = summarize_text(client, "x")
+
+        self.assertEqual(result, "確認できた事実の要約です。")
+        self.assertEqual(len(client.calls), 1)
+        self.assertEqual(client.calls[0]["messages"][0]["content"][0]["text"], "次の調査メモを要約してください。\n\nx")
+
+    def test_api_free_file_tests_do_not_create_a_bedrock_client(self):
+        # File validation operates on local text and has no client parameter.
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "memo.txt"
+            path.write_text(TEST_INPUT, encoding="utf-8")
+            self.assertIn("調査メモ", read_text_file(path))
+
+    def test_missing_file_stops_before_bedrock_client_is_created(self):
+        with tempfile.TemporaryDirectory() as directory:
+            missing = Path(directory) / "missing.txt"
+            error_output = StringIO()
+            from unittest.mock import patch
+
+            with patch("s09_l02.create_client") as create_client, redirect_stderr(error_output):
+                result = l02_main(["--file", str(missing)])
+
+        self.assertEqual(result, 2)
+        self.assertIn("ファイルが見つかりません", error_output.getvalue())
+        create_client.assert_not_called()
 
 
 if __name__ == "__main__":

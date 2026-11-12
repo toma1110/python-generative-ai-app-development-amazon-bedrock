@@ -1,0 +1,242 @@
+import unittest
+import os
+import subprocess
+import sys
+from io import BytesIO, StringIO
+from pathlib import Path
+from unittest.mock import Mock, patch
+from botocore.exceptions import BotoCoreError, ClientError
+
+from s11_app import load_note, main
+from s11_common import IncompleteResponseError, ask_model, create_bedrock_client, response_metrics
+from s11_l02 import OBJECT_KEY, prepare_bucket
+from s11_l03 import read_s3_text
+from s11_l06 import BASELINE_PROMPT, REVISED_PROMPT, compare, main as s11_l06_main
+
+
+def response(text="応答", stop_reason="end_turn"):
+    return {
+        "output": {"message": {"content": [{"text": text}]}},
+        "usage": {"inputTokens": 11, "outputTokens": 7},
+        "metrics": {"latencyMs": 100},
+        "stopReason": stop_reason,
+    }
+
+
+class Section11Tests(unittest.TestCase):
+    def test_cli_help_uses_utf8_even_when_parent_encoding_is_cp1252(self):
+        section_dir = Path(__file__).resolve().parents[1]
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "cp1252"
+        for script in ("s11_app.py", "s11_l02.py", "s11_l03.py", "s11_l06.py"):
+            with self.subTest(script=script):
+                result = subprocess.run(
+                    [sys.executable, str(section_dir / script), "--help"],
+                    cwd=section_dir.parents[1],
+                    env=env,
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr.decode("utf-8", errors="replace"))
+                self.assertIn("usage:", result.stdout.decode("utf-8"))
+
+    def test_setup_creates_only_requested_bucket_and_fixed_object(self):
+        s3 = Mock()
+        s3.head_bucket.side_effect = ClientError(
+            {"Error": {"Code": "404"}, "ResponseMetadata": {"HTTPStatusCode": 404}}, "HeadBucket"
+        )
+        self.assertEqual(prepare_bucket(s3, "example-unique-bucket", "us-west-2", b"memo"), OBJECT_KEY)
+        s3.create_bucket.assert_called_once_with(
+            Bucket="example-unique-bucket", CreateBucketConfiguration={"LocationConstraint": "us-west-2"}
+        )
+        s3.put_object.assert_called_once_with(
+            Bucket="example-unique-bucket", Key=OBJECT_KEY, Body=b"memo", ContentType="text/plain; charset=utf-8"
+        )
+
+    def test_setup_refuses_existing_bucket_without_writing(self):
+        s3 = Mock()
+        s3.head_bucket.return_value = {}
+        with self.assertRaisesRegex(ValueError, "既に存在"):
+            prepare_bucket(s3, "existing", "us-east-1", b"memo")
+        s3.create_bucket.assert_not_called()
+        s3.put_object.assert_not_called()
+
+    def test_s3_read_uses_exact_bucket_and_key_and_closes_body(self):
+        body = BytesIO("架空メモ".encode())
+        s3 = Mock()
+        s3.get_object.return_value = {"Body": body}
+        self.assertEqual(read_s3_text(s3, "demo-bucket", OBJECT_KEY), "架空メモ")
+        s3.get_object.assert_called_once_with(Bucket="demo-bucket", Key=OBJECT_KEY)
+        self.assertTrue(body.closed)
+
+    def test_local_and_s3_are_loaded_through_one_app_entry_point(self):
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "memo.txt"
+            path.write_text("local memo", encoding="utf-8")
+            self.assertEqual(load_note("local", path, None, OBJECT_KEY), "local memo")
+
+    def test_s3_read_failure_reports_input_help_and_skips_bedrock(self):
+        error = ClientError(
+            {"Error": {"Code": "AccessDenied", "Message": "private detail"}}, "GetObject"
+        )
+        stderr = StringIO()
+        with (
+            patch("s11_app.load_note", side_effect=error),
+            patch("s11_app.create_bedrock_client") as create_client,
+            patch("s11_app.ask_model") as invoke_model,
+            patch("s11_app.sys.stderr", stderr),
+        ):
+            self.assertEqual(main(["--source", "s3", "--bucket", "demo-bucket"]), 1)
+        self.assertIn("入力の読み込みに失敗しました (ClientError)", stderr.getvalue())
+        self.assertIn("bucket/key、s3:GetObject権限", stderr.getvalue())
+        self.assertNotIn("private detail", stderr.getvalue())
+        create_client.assert_not_called()
+        invoke_model.assert_not_called()
+
+    def test_invalid_utf8_input_does_not_print_decode_exception_details(self):
+        error = UnicodeDecodeError("utf-8", b"private bytes", 0, 1, "invalid start byte")
+        stderr = StringIO()
+        with (
+            patch("s11_app.load_note", side_effect=error),
+            patch("s11_app.create_bedrock_client") as create_client,
+            patch("s11_app.ask_model") as invoke_model,
+            patch("s11_app.sys.stderr", stderr),
+        ):
+            self.assertEqual(main(["--source", "s3", "--bucket", "demo-bucket"]), 1)
+        self.assertIn("入力の読み込みに失敗しました (UnicodeDecodeError)", stderr.getvalue())
+        self.assertIn("UTF-8のテキスト", stderr.getvalue())
+        self.assertNotIn("private bytes", stderr.getvalue())
+        create_client.assert_not_called()
+        invoke_model.assert_not_called()
+
+    def test_bedrock_client_creation_failure_reports_inference_help(self):
+        stderr = StringIO()
+        with (
+            patch("s11_app.load_note", return_value="memo"),
+            patch("s11_app.create_bedrock_client", side_effect=BotoCoreError(error_msg="private detail")),
+            patch("s11_app.ask_model") as invoke_model,
+            patch("s11_app.sys.stderr", stderr),
+        ):
+            self.assertEqual(main(["--source", "local"]), 1)
+        self.assertIn("Bedrock推論に失敗しました (BotoCoreError)", stderr.getvalue())
+        self.assertIn("BEDROCK_MODEL_ID", stderr.getvalue())
+        self.assertIn("bedrock:InvokeModel", stderr.getvalue())
+        self.assertNotIn("private detail", stderr.getvalue())
+        invoke_model.assert_not_called()
+
+    def test_converse_failure_reports_inference_help_without_response_body(self):
+        error = ClientError(
+            {"Error": {"Code": "AccessDeniedException", "Message": "private response body"}}, "Converse"
+        )
+        stderr = StringIO()
+        with (
+            patch("s11_app.load_note", return_value="memo"),
+            patch("s11_app.create_bedrock_client", return_value=Mock()),
+            patch("s11_app.ask_model", side_effect=error),
+            patch("s11_app.sys.stderr", stderr),
+        ):
+            self.assertEqual(main(["--source", "local"]), 1)
+        self.assertIn("Bedrock推論に失敗しました (ClientError)", stderr.getvalue())
+        self.assertIn("BEDROCK_MODEL_ID", stderr.getvalue())
+        self.assertNotIn("private response body", stderr.getvalue())
+        self.assertNotIn("入力の読み込みに失敗", stderr.getvalue())
+
+    def test_incomplete_model_response_is_reported_without_traceback(self):
+        stderr = StringIO()
+        with (
+            patch("s11_app.load_note", return_value="memo"),
+            patch("s11_app.create_bedrock_client", return_value=Mock()),
+            patch("s11_app.ask_model", side_effect=IncompleteResponseError("max_tokens")),
+            patch("s11_app.sys.stderr", stderr),
+        ):
+            self.assertEqual(main(["--source", "local"]), 1)
+        self.assertIn("stopReason: max_tokens", stderr.getvalue())
+        self.assertIn("自動再送もしない", stderr.getvalue())
+        self.assertNotIn("Traceback", stderr.getvalue())
+
+    def test_model_request_reports_text_usage_and_safe_system_instruction(self):
+        client = Mock()
+        client.converse.return_value = response("要約")
+        result = ask_model(client, "架空メモ", "summary")
+        request = client.converse.call_args.kwargs
+        self.assertEqual(result, {
+            "text": "要約", "input_tokens": 11, "output_tokens": 7,
+            "latency_ms": 100, "stop_reason": "end_turn",
+        })
+        self.assertEqual(request["inferenceConfig"]["maxTokens"], 512)
+        self.assertIn("断定しません", request["system"][0]["text"])
+        self.assertIn("架空メモ", request["messages"][0]["content"][0]["text"])
+
+    def test_bedrock_client_disables_sdk_retries(self):
+        session = Mock()
+        with patch("s11_common.boto3.Session", return_value=session):
+            create_bedrock_client()
+        config = session.client.call_args.kwargs["config"]
+        self.assertEqual(config.retries["total_max_attempts"], 1)
+
+    def test_incomplete_response_is_rejected_without_retry(self):
+        client = Mock()
+        client.converse.return_value = response("途中の文", stop_reason="max_tokens")
+        with self.assertRaisesRegex(IncompleteResponseError, "max_tokens"):
+            ask_model(client, "架空メモ", "summary")
+        client.converse.assert_called_once()
+
+    def test_comparison_uses_identical_note_with_two_different_prompts(self):
+        client = Mock()
+        client.converse.side_effect = [response("前"), response("後")]
+        results = list(compare(client, "same note"))
+        self.assertNotEqual(BASELINE_PROMPT, REVISED_PROMPT)
+        self.assertEqual(client.converse.call_count, 2)
+        self.assertEqual(
+            [call.kwargs["messages"][0]["content"][0]["text"].split("--- 調査メモ ---\n", 1)[1]
+             for call in client.converse.call_args_list],
+            ["same note", "same note"],
+        )
+        self.assertEqual(
+            [label for label, _ in results],
+            ["BASELINE（既存の短い要約指示）", "REVISED（編集対象の指示）"],
+        )
+
+    def test_missing_metrics_are_reported_as_unknown(self):
+        self.assertEqual(response_metrics({}), {
+            "input_tokens": "不明", "output_tokens": "不明",
+            "latency_ms": "不明", "stop_reason": "不明",
+        })
+
+    def test_first_complete_result_is_printed_and_kept_if_second_call_is_incomplete(self):
+        output = StringIO()
+        error_output = StringIO()
+        client = Mock()
+        call_count = 0
+
+        def ask_once(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 2:
+                self.assertIn("## BASELINE（既存の短い要約指示）", output.getvalue())
+                self.assertIn("最初の回答", output.getvalue())
+                raise IncompleteResponseError("max_tokens")
+            return {
+                "text": "最初の回答",
+                "input_tokens": 11, "output_tokens": 7,
+                "latency_ms": 100, "stop_reason": "end_turn",
+            }
+
+        with (
+            patch("s11_l06.load_note", return_value="same note"),
+            patch("s11_l06.create_bedrock_client", return_value=client),
+            patch("s11_l06.ask_model", side_effect=ask_once),
+            patch("s11_l06.sys.stdout", output),
+            patch("s11_l06.sys.stderr", error_output),
+        ):
+            self.assertEqual(s11_l06_main(["--source", "local"]), 1)
+        self.assertEqual(call_count, 2)
+        self.assertIn("最初の回答", output.getvalue())
+        self.assertIn("stopReason: max_tokens", error_output.getvalue())
+
+
+if __name__ == "__main__":
+    unittest.main()
