@@ -9,7 +9,7 @@
 - Gitを使う場合は、`git clone https://github.com/toma1110/python-generative-ai-app-development-amazon-bedrock.git`を実行します。
 - ZIPを使う場合は、リポジトリ画面の「Code」から「Download ZIP」を選び、展開します。
 
-展開またはcloneしたフォルダーをターミナルで開きます。すべての演習は`sections/s05/`内のフォルダーを使います。Pythonのバージョンは3.10以降です。以下の例は`python`コマンドを使います。Windowsで認識されない場合は`py`、macOS/Linuxで認識されない場合は`python3`に読み替えてください。
+展開またはcloneしたフォルダーをターミナルで開きます。すべての演習は`sections/s05/`内のフォルダーを使います。Pythonのバージョンは3.11以降です。以下の例は`python`コマンドを使います。Windowsで認識されない場合は`py`、macOS/Linuxで認識されない場合は`python3`に読み替えてください。
 
 ## 演習の順序
 
